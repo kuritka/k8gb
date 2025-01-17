@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	externaldns "sigs.k8s.io/external-dns/endpoint"
 
 	ibcl "github.com/infobloxopen/infoblox-go-client"
@@ -66,7 +67,13 @@ func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.
 		m.InfobloxIncrementZoneUpdateError(gslb)
 		return err
 	}
-	addresses, err := p.assistant.GslbIngressExposedIPs(gslb)
+
+	var addresses []string
+	if p.config.CoreDNSExposed {
+		addresses, err = p.assistant.CoreDNSExposedIPs()
+	} else {
+		addresses = gslb.Status.LoadBalancer.ExposedIPs
+	}
 	if err != nil {
 		m.InfobloxIncrementZoneUpdateError(gslb)
 		return err
@@ -150,7 +157,7 @@ func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.
 	return nil
 }
 
-func (p *InfobloxProvider) Finalize(gslb *k8gbv1beta1.Gslb) error {
+func (p *InfobloxProvider) Finalize(gslb *k8gbv1beta1.Gslb, _ client.Client) error {
 	objMgr, err := p.client.GetObjectManager()
 	if err != nil {
 		return err
@@ -198,10 +205,6 @@ func (p *InfobloxProvider) Finalize(gslb *k8gbv1beta1.Gslb) error {
 
 func (p *InfobloxProvider) GetExternalTargets(host string) (targets assistant.Targets) {
 	return p.assistant.GetExternalTargets(host, p.config.GetExternalClusterNSNames())
-}
-
-func (p *InfobloxProvider) GslbIngressExposedIPs(gslb *k8gbv1beta1.Gslb) ([]string, error) {
-	return p.assistant.GslbIngressExposedIPs(gslb)
 }
 
 func (p *InfobloxProvider) SaveDNSEndpoint(gslb *k8gbv1beta1.Gslb, i *externaldns.DNSEndpoint) error {

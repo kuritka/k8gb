@@ -11,21 +11,22 @@ on:
      - 'chart/k8gb/**'
 permissions:
   contents: read
+  security-events: write # To upload sarif file
 
 jobs:
   terrascan:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Harden Runner
-      uses: step-security/harden-runner@2e205a28d0e1da00c5f53b161f4067b052c61f34
+      uses: step-security/harden-runner@0080882f6c36860b6ba35c610c98ce87d4e2f26f # v2.10.2
       with:
         egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
     - name: Checkout repository
-      uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
     - name: Run Terrascan
       id: terrascan
-      uses: accurics/terrascan-action@fad2372c88bb11afccc0b682bffbeffd443b56ed
+      uses: accurics/terrascan-action@a4b0f7ec5fb3c4c66b8e76d824d958002f6ce12c
       with:
         iac_type: helm
         iac_version: v3
@@ -34,6 +35,6 @@ jobs:
         sarif_upload: true
         iac_dir: chart/k8gb
     - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@2956c096220fb34b6bf430b4ec7dcff2e77c8084
+      uses: github/codeql-action/upload-sarif@aa578102511db1f4524ed59b8cc2bae4f6e88195 # v3.27.6
       with:
         sarif_file: terrascan.sarif

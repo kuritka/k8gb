@@ -2,7 +2,6 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - deadcode
     - errcheck
     - gocritic
     - gocyclo
@@ -16,37 +15,64 @@ linters:
     - nakedret
     - lll
     - noctx
-    - rowserrcheck
     - staticcheck
-    - structcheck
     - stylecheck
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
     - depguard
     - dogsled
-    - exportloopref
+    - copyloopvar
     - goconst
     - goprintffuncname
     - nolintlint
     - dupl
     - gochecknoinits
 
- # don't enable:
- #  - golint        # deprecated
- #  - whitespace
- #  - funlen
- #  - exhaustive
- #  - gomnd
- #  - gofmt
+  # don't enable:
+  #  - golint        # deprecated
+  #  - whitespace
+  #  - funlen
+  #  - exhaustive
+  #  - gomnd
+  #  - gofmt
+  #  - deadcode      # deprecated since v1.49.0
+  #  - structcheck   # deprecated since v1.49.0
+  #  - varcheck      # deprecated since v1.49.0
+  #  - rowserrcheck  # rowserrcheck is disabled because of generics. You can track the evolution of the generics support by following the https://github.com/golangci/golangci-lint/issues/2649
 
 run:
   deadline: 3m
 linters-settings:
   lll:
     line-length: 150
+
+  depguard:
+    # https://golangci-lint.run/usage/linters/#depguard
+    # https://github.com/OpenPeeDeeP/depguard
+    rules:
+      main:
+        allow:
+          - $gostd
+          - istio.io/client-go
+          - k8s.io/apimachinery
+          - k8s.io/client-go
+          - k8s.io/api
+          - sigs.k8s.io/controller-runtime
+          - sigs.k8s.io/external-dns
+          - github.com/AbsaOSS
+          - github.com/ghodss/yaml
+          - github.com/go-logr
+          - github.com/golang/mock/
+          - github.com/infobloxopen
+          - github.com/k8gb-io
+          - github.com/miekg
+          - github.com/prometheus
+          - github.com/rs/zerolog
+          - github.com/stretchr/testify
+          - go.opentelemetry.io/otel
+          - go.uber.org/mock/gomock
 
 issues:
   exclude-rules:

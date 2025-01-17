@@ -2,7 +2,9 @@ apiVersion: k3d.io/v1alpha4
 kind: Simple
 metadata:
   name: edgedns
-image: docker.io/rancher/k3s:v1.25.2-k3s1
+# Used by renovate
+# repo: rancher/k3s
+image: docker.io/rancher/k3s:v1.30.2-k3s1
 agents: 0
 network: k3d-action-bridge-network
 ports:
@@ -20,3 +22,21 @@ options:
       - arg: --disable=traefik,servicelb,metrics-server,local-storage
         nodeFilters:
           - server:*
+registries:
+  create:
+    name: k3d-docker-io # name of the registry container
+    proxy:
+      remoteURL: https://registry-1.docker.io # proxy DockerHub
+    volumes:
+      - /tmp/k3d-docker-io:/var/lib/registry # persist data locally in /tmp/
+  config: | # tell K3s to use this registry when pulling from DockerHub
+    mirrors:
+      "docker.io":
+        endpoint:
+          - http://k3d-docker-io:5000
+      "ghcr.io":
+        endpoint:
+          - http://k3d-ghcr-io:5000
+      "k8s.gcr.io":
+        endpoint:
+          - http://k3d-k8s-gcr-io:5000

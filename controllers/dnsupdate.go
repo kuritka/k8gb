@@ -38,17 +38,9 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 	var gslbHosts []*externaldns.Endpoint
 	var ttl = externaldns.TTL(gslb.Spec.Strategy.DNSTtlSeconds)
 
-	serviceHealth, err := r.getServiceHealthStatus(gslb)
-	if err != nil {
-		return nil, err
-	}
+	localTargets := gslb.Status.LoadBalancer.ExposedIPs
 
-	localTargets, err := r.DNSProvider.GslbIngressExposedIPs(gslb)
-	if err != nil {
-		return nil, err
-	}
-
-	for host, health := range serviceHealth {
+	for host, health := range gslb.Status.ServiceHealth {
 		var finalTargets = assistant.NewTargets()
 
 		if !strings.Contains(host, r.Config.EdgeDNSZone) {
@@ -82,7 +74,7 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 				// If cluster is Primary
 				if isPrimary {
 					// If cluster is Primary and Healthy return only own targets
-					// If cluster is Primary and Unhealthy return Secondary external targets
+					// If cluster is Primary and Unhealthy return all external targets
 					if !isHealthy {
 						finalTargets = externalTargets
 						log.Info().
@@ -94,9 +86,14 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 					}
 				} else {
 					// If cluster is Secondary and Primary external cluster is Healthy
-					// then return Primary external targets.
-					// Return own targets by default.
-					finalTargets = externalTargets
+					// then return Primary external targets
+					// otherwise return all other targets
+					if _, ok := externalTargets[gslb.Spec.Strategy.PrimaryGeoTag]; ok {
+						finalTargets = assistant.NewTargets()
+						finalTargets.Append(gslb.Spec.Strategy.PrimaryGeoTag, externalTargets[gslb.Spec.Strategy.PrimaryGeoTag].IPs)
+					} else {
+						finalTargets.AppendTargets(externalTargets)
+					}
 					log.Info().
 						Str("gslb", gslb.Name).
 						Str("cluster", gslb.Spec.Strategy.PrimaryGeoTag).
@@ -147,7 +144,7 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 		Spec: dnsEndpointSpec,
 	}
 
-	err = controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme)
+	err := controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme)
 	if err != nil {
 		return nil, err
 	}

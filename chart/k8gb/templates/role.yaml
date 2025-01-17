@@ -10,6 +10,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - endpoints
   - services
   verbs:
@@ -55,5 +62,16 @@ rules:
   - ingresses/finalizers
   verbs:
   - update
+{{- end }}
+{{- if .Values.istio.enabled }}
+- apiGroups:
+  - networking.istio.io
+  resources:
+  - virtualservices
+  - gateways
+  verbs:
+  - 'get'
+  - 'list'
+  - 'watch'
 {{- end }}
 {{- end }}

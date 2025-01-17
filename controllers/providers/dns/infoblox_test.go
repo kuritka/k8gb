@@ -22,16 +22,17 @@ import (
 	"os"
 	"testing"
 
+	"github.com/k8gb-io/k8gb/controllers/utils"
+
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
 	"github.com/k8gb-io/k8gb/controllers/depresolver"
-	"github.com/k8gb-io/k8gb/controllers/internal/utils"
 	"github.com/k8gb-io/k8gb/controllers/mocks"
 	"github.com/k8gb-io/k8gb/controllers/providers/assistant"
 
-	"github.com/golang/mock/gomock"
 	ibclient "github.com/infobloxopen/infoblox-go-client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 const (
@@ -70,7 +71,6 @@ var (
 	}
 
 	defaultGslb = new(k8gbv1beta1.Gslb)
-	ipRange     = []string{"10.0.0.1", "10.0.0.2"}
 )
 
 func TestCanFilterOutDelegatedZoneEntryAccordingFQDNProvided(t *testing.T) {
@@ -168,7 +168,6 @@ func TestInfobloxCreateZoneDelegationForExternalDNS(t *testing.T) {
 	a := mocks.NewMockAssistant(ctrl)
 	cl := mocks.NewMockInfobloxClient(ctrl)
 	con := mocks.NewMockIBConnector(ctrl)
-	a.EXPECT().GslbIngressExposedIPs(gomock.Any()).Return(ipRange, nil).Times(1)
 	con.EXPECT().CreateObject(gomock.Any()).Return(ref, nil).AnyTimes()
 	con.EXPECT().UpdateObject(gomock.Any(), gomock.Any()).Return(ref, nil).Times(1)
 	con.EXPECT().GetObject(gomock.Any(), gomock.Any(), gomock.Any()).SetArg(2, []ibclient.ZoneDelegated{defaultDelegatedZone}).Return(nil)
@@ -189,8 +188,7 @@ func TestInfobloxCreateZoneDelegationForExternalDNSWithSplitBrainEnabled(t *test
 	a := mocks.NewMockAssistant(ctrl)
 	cl := mocks.NewMockInfobloxClient(ctrl)
 	con := mocks.NewMockIBConnector(ctrl)
-	a.EXPECT().GslbIngressExposedIPs(gomock.Any()).Return(ipRange, nil).Times(1)
-	a.EXPECT().InspectTXTThreshold(gomock.Any(), gomock.Any()).Do(func(fqdn string, arg1 interface{}) {
+	a.EXPECT().InspectTXTThreshold(gomock.Any(), gomock.Any()).Do(func(fqdn string, _ interface{}) {
 		require.Equal(t, "test-gslb-heartbeat-us-east-1.example.com", fqdn)
 	}).Return(nil).Times(1)
 	con.EXPECT().CreateObject(gomock.Any()).Return(ref, nil).AnyTimes()
@@ -198,7 +196,7 @@ func TestInfobloxCreateZoneDelegationForExternalDNSWithSplitBrainEnabled(t *test
 	con.EXPECT().GetObject(gomock.Any(), gomock.Any(), gomock.Any()).SetArg(2, []ibclient.ZoneDelegated{defaultDelegatedZone}).Return(nil)
 	cl.EXPECT().GetObjectManager().Return(ibclient.NewObjectManager(con, "k8gbclient", ""), nil).Times(1)
 	con.EXPECT().GetObject(gomock.Any(), gomock.Any(), gomock.Any()).SetArg(2, []ibclient.RecordTXT{{Ref: ref}}).
-		Return(nil).Do(func(arg0 *ibclient.RecordTXT, arg1, arg2 interface{}) {
+		Return(nil).Do(func(arg0 *ibclient.RecordTXT, _, _ interface{}) {
 		require.Equal(t, "test-gslb-heartbeat-us-west-1.example.com", arg0.Name)
 	}).AnyTimes()
 	config := defaultConfig
@@ -218,7 +216,6 @@ func TestInfobloxCreateZoneDelegationForExternalDNSWithSplitBrainEnabledCreating
 	a := mocks.NewMockAssistant(ctrl)
 	cl := mocks.NewMockInfobloxClient(ctrl)
 	con := mocks.NewMockIBConnector(ctrl)
-	a.EXPECT().GslbIngressExposedIPs(gomock.Any()).Return(ipRange, nil).Times(1)
 	a.EXPECT().InspectTXTThreshold(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	con.EXPECT().CreateObject(gomock.Any()).Return(ref, nil).AnyTimes()
 	con.EXPECT().UpdateObject(gomock.Any(), gomock.Any()).Return(ref, nil).Times(1)
@@ -248,7 +245,7 @@ func TestInfobloxFinalize(t *testing.T) {
 	con.EXPECT().GetObject(gomock.Any(), gomock.Any(), gomock.Any()).SetArg(2, []ibclient.ZoneDelegated{defaultDelegatedZone}).
 		Return(nil).Times(1)
 	con.EXPECT().GetObject(gomock.Any(), gomock.Any(), gomock.Any()).SetArg(2, []ibclient.RecordTXT{{Ref: ref}}).
-		Return(nil).Do(func(arg0 *ibclient.RecordTXT, arg1, arg2 interface{}) {
+		Return(nil).Do(func(arg0 *ibclient.RecordTXT, _, _ interface{}) {
 		require.Equal(t, "test-gslb-heartbeat-us-west-1.example.com", arg0.Name)
 	}).Times(1)
 	cl.EXPECT().GetObjectManager().Return(ibclient.NewObjectManager(con, "k8gbclient", ""), nil).Times(1)
@@ -256,7 +253,7 @@ func TestInfobloxFinalize(t *testing.T) {
 	provider := NewInfobloxDNS(config, a, cl)
 
 	// act
-	err := provider.Finalize(defaultGslb)
+	err := provider.Finalize(defaultGslb, nil)
 
 	// assert
 	assert.NoError(t, err)

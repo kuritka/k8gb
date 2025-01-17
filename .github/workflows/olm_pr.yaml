@@ -7,6 +7,10 @@ on:
         description: Version of the bundle that should be generated. If not provided, the latest release tag is taken. Use 'master' for incorporating the latest changes in repo
         required: false
         default: ""
+      downstreamRepo:
+          description: "The pull request will be opened from this repository"
+          required: true
+          default: "k8gb-io/community-operators"
       upstreamRepo:
         description: "The pull request will be opened against this repository"
         required: true
@@ -21,14 +25,14 @@ permissions:  # added using https://github.com/step-security/secure-workflows
 
 jobs:
   olm-bundle-pr:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@2e205a28d0e1da00c5f53b161f4067b052c61f34
+        uses: step-security/harden-runner@0080882f6c36860b6ba35c610c98ce87d4e2f26f # v2.10.2
         with:
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
-      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
@@ -56,7 +60,7 @@ jobs:
           rm ./olm/bundle/Dockerfile
           cp -r ./olm/bundle $GITHUB_WORKSPACE/
 
-      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: ${{ github.event.inputs.upstreamRepo }}
           path: sandbox
@@ -71,10 +75,10 @@ jobs:
 
       - name: Open Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@b4d51739f96fca8047ad065eccef63442d8e99f7
+        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f # v7.0.5
         with:
           token: ${{ secrets.CR_TOKEN }}
-          push-to-fork: k8gb-io/community-operators
+          push-to-fork: ${{ github.event.inputs.downstreamRepo }}
           path: sandbox
           commit-message: OLM bundle for k8gb@${{ env.bundleDir }}
           title: operators k8gb (${{ env.bundleDir }})

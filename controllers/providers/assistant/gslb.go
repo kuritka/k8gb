@@ -25,13 +25,12 @@ import (
 	"strings"
 	"time"
 
-	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
-	"github.com/k8gb-io/k8gb/controllers/internal/utils"
+	"github.com/k8gb-io/k8gb/controllers/utils"
+
 	"github.com/k8gb-io/k8gb/controllers/logging"
 
 	"github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
-	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -59,8 +58,8 @@ func NewGslbAssistant(client client.Client, k8gbNamespace string, edgeDNSServers
 	}
 }
 
-// CoreDNSExposedIPs retrieves list of IP's exposed by CoreDNS
-func (r *Gslb) CoreDNSExposedIPs() ([]string, error) {
+// GetCoreDNSService returns the CoreDNS Service
+func (r *Gslb) GetCoreDNSService() (*corev1.Service, error) {
 	serviceList := &corev1.ServiceList{}
 	sel, err := labels.Parse(coreDNSServiceLabel)
 	if err != nil {
@@ -89,7 +88,27 @@ func (r *Gslb) CoreDNSExposedIPs() ([]string, error) {
 		return nil, err
 	}
 	coreDNSService := &serviceList.Items[0]
+	return coreDNSService, nil
+}
 
+// CoreDNSExposedIPs retrieves list of IP's exposed by CoreDNS
+func (r *Gslb) CoreDNSExposedIPs() ([]string, error) {
+	coreDNSService, err := r.GetCoreDNSService()
+	if err != nil {
+		return nil, err
+	}
+	if coreDNSService.Spec.Type == "ClusterIP" {
+		if len(coreDNSService.Spec.ClusterIPs) == 0 {
+			errMessage := "no ClusterIPs found"
+			log.Warn().
+				Str("serviceName", coreDNSService.Name).
+				Msg(errMessage)
+			err := coreerrors.New(errMessage)
+			return nil, err
+		}
+		return coreDNSService.Spec.ClusterIPs, nil
+	}
+	// LoadBalancer / ExternalName / NodePort service
 	var lb corev1.LoadBalancerIngress
 	if len(coreDNSService.Status.LoadBalancer.Ingress) == 0 {
 		errMessage := "no LoadBalancer ExternalIPs are found"
@@ -105,7 +124,7 @@ func (r *Gslb) CoreDNSExposedIPs() ([]string, error) {
 
 func extractIPFromLB(lb corev1.LoadBalancerIngress, ns utils.DNSList) (ips []string, err error) {
 	if lb.Hostname != "" {
-		IPs, err := utils.Dig(lb.Hostname, ns...)
+		IPs, err := utils.Dig(lb.Hostname, 8, ns...)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("loadBalancerHostname", lb.Hostname).
@@ -118,44 +137,6 @@ func extractIPFromLB(lb corev1.LoadBalancerIngress, ns utils.DNSList) (ips []str
 		return []string{lb.IP}, nil
 	}
 	return nil, nil
-}
-
-// GslbIngressExposedIPs retrieves list of IP's exposed by all GSLB ingresses
-func (r *Gslb) GslbIngressExposedIPs(gslb *k8gbv1beta1.Gslb) ([]string, error) {
-	nn := types.NamespacedName{
-		Name:      gslb.Name,
-		Namespace: gslb.Namespace,
-	}
-
-	gslbIngress := &netv1.Ingress{}
-
-	err := r.client.Get(context.TODO(), nn, gslbIngress)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info().
-				Str("gslb", gslb.Name).
-				Msg("Can't find gslb Ingress")
-		}
-		return nil, err
-	}
-
-	var gslbIngressIPs []string
-
-	for _, ip := range gslbIngress.Status.LoadBalancer.Ingress {
-		if len(ip.IP) > 0 {
-			gslbIngressIPs = append(gslbIngressIPs, ip.IP)
-		}
-		if len(ip.Hostname) > 0 {
-			IPs, err := utils.Dig(ip.Hostname, r.edgeDNSServers...)
-			if err != nil {
-				log.Warn().Err(err).Msg("Dig error")
-				return nil, err
-			}
-			gslbIngressIPs = append(gslbIngressIPs, IPs...)
-		}
-	}
-
-	return gslbIngressIPs, nil
 }
 
 // SaveDNSEndpoint update DNS endpoint or create new one if doesnt exist
@@ -305,7 +286,7 @@ func (r *Gslb) GetExternalTargets(host string, extClusterNsNames map[string]stri
 			Msg("Adding external Gslb targets from cluster")
 		glueA, err := dnsQuery(cluster, r.edgeDNSServers)
 		if err != nil {
-			return
+			return targets
 		}
 		log.Info().
 			Str("nameserver", cluster).
@@ -323,7 +304,7 @@ func (r *Gslb) GetExternalTargets(host string, extClusterNsNames map[string]stri
 		lHost := fmt.Sprintf("localtargets-%s", host)
 		a, err := dnsQuery(lHost, nameServersToUse)
 		if err != nil {
-			return
+			return targets
 		}
 		clusterTargets := getARecords(a)
 		if len(clusterTargets) > 0 {

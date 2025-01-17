@@ -2,11 +2,16 @@ apiVersion: k3d.io/v1alpha4
 kind: Simple
 metadata:
   name: test-gslb2
-image: docker.io/rancher/k3s:v1.25.2-k3s1
+# Used by renovate
+# repo: rancher/k3s
+image: docker.io/rancher/k3s:v1.30.2-k3s1
 agents: 1
 network: k3d-action-bridge-network
 ports:
   - port: 81:80
+    nodeFilters:
+      - agent:0:direct
+  - port: 8081:8080
     nodeFilters:
       - agent:0:direct
   - port: 444:443
@@ -26,6 +31,24 @@ options:
     disableLoadbalancer: true
   k3s:
     extraArgs:
-      - arg: --disable=traefik,servicelb,metrics-server,local-storage
+      - arg: --disable=traefik,metrics-server,local-storage
         nodeFilters:
           - server:*
+registries:
+  create:
+    name: k3d-k8s-gcr-io # name of the registry container
+    proxy:
+      remoteURL: https://k8s.gcr.io # proxy k8s.gcr.io
+    volumes:
+      - /tmp/k3d-k8s-gcr-io:/var/lib/registry # persist data locally in /tmp/
+  config: | # tell K3s to use this registry when pulling from DockerHub
+    mirrors:
+      "docker.io":
+        endpoint:
+          - http://k3d-docker-io:5000
+      "ghcr.io":
+        endpoint:
+          - http://k3d-ghcr-io:5000
+      "k8s.gcr.io":
+        endpoint:
+          - http://k3d-k8s-gcr-io:5000

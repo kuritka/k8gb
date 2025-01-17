@@ -1,56 +1,28 @@
 name: Terratest for n clusters
 
 on:
-  push:
-    paths-ignore:
-      - '**.md'
-      - '**.svg'
-      - '**.drawio'
-      - '.spelling'
   pull_request:
-    branches:
-      - master
-    paths-ignore:
-      - '**.md'
-      - '**.svg'
-      - '**.drawio'
-      - '.spelling'
+    types:
+      - labeled
+
 permissions:
   contents: read
 
 jobs:
-  skip-check:
-    runs-on: ubuntu-latest
-    name: Skip the job?
-    outputs:
-          should_skip: ${{ steps.skip_check.outputs.should_skip }}
-    steps:
-    - name: Harden Runner
-      uses: step-security/harden-runner@2e205a28d0e1da00c5f53b161f4067b052c61f34
-      with:
-        egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
-
-    - id: skip_check
-      uses: fkirc/skip-duplicate-actions@f11521568414503656a5af807dc3018c012552c4
-      with:
-        skip_after_successful_duplicate: 'true'
-        do_not_skip: '["workflow_dispatch", "schedule"]'
-
   terratest-n-clusters:
-    runs-on: ubuntu-20.04
-    needs: skip-check
-    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.label.name == 'heavy-tests' }}
     steps:
-      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
         with:
-          go-version: "1.17.6"
+          go-version: 1.23.3
 
       - name: Build artifacts
-        uses: goreleaser/goreleaser-action@b953231f81b8dfd023c58e0854a721e35037f28b
+        uses: goreleaser/goreleaser-action@9ed2f89a662bf1735a48bc8557fd212fa902bebf # v6.1.0
         with:
           version: v1.7.0
           args: release --rm-dist --skip-publish --skip-validate --snapshot --skip-sbom --skip-sign
@@ -58,25 +30,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create edgeDNS k3s Cluster
-        uses: AbsaOSS/k3d-action@b176c2a6dcae72e3e64e3e4d61751904ec314002
+        uses: AbsaOSS/k3d-action@4e8b3239042be1dc0aed6c5eb80c13b18200fc79
         with:
           cluster-name: "edgedns"
           args: -c k3d/edge-dns.yaml
 
       - name: Create 1st k3s Cluster
-        uses: AbsaOSS/k3d-action@b176c2a6dcae72e3e64e3e4d61751904ec314002
+        uses: AbsaOSS/k3d-action@4e8b3239042be1dc0aed6c5eb80c13b18200fc79
         with:
           cluster-name: "test-gslb1"
           args: -c k3d/test-gslb1.yaml
 
       - name: Create 2nd k3s Cluster
-        uses: AbsaOSS/k3d-action@b176c2a6dcae72e3e64e3e4d61751904ec314002
+        uses: AbsaOSS/k3d-action@4e8b3239042be1dc0aed6c5eb80c13b18200fc79
         with:
           cluster-name: "test-gslb2"
           args: -c k3d/test-gslb2.yaml
 
       - name: Create 3rd k3s Cluster
-        uses: AbsaOSS/k3d-action@b176c2a6dcae72e3e64e3e4d61751904ec314002
+        uses: AbsaOSS/k3d-action@4e8b3239042be1dc0aed6c5eb80c13b18200fc79
         with:
           cluster-name: "test-gslb3"
           args: -c k3d/test-gslb3.yaml
@@ -101,9 +73,9 @@ jobs:
 
       - name: Print debug info
         if: always()
-        uses: ./.github/actions/print-debug
+        uses: ./.github/actions/print-terratest-debug
 
-      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: always()
         with:
           name: terratest-logs

@@ -2,7 +2,9 @@ apiVersion: k3d.io/v1alpha4
 kind: Simple
 metadata:
   name: test-gslb$CLUSTER_INDEX
-image: docker.io/rancher/k3s:v1.25.2-k3s1
+# Used by renovate
+# repo: rancher/k3s
+image: docker.io/rancher/k3s:v1.30.2-k3s1
 agents: 1
 network: k3d-action-bridge-network
 ports:

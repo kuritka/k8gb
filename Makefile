@@ -24,6 +24,10 @@ endif
 ###############################
 #		CONSTANTS
 ###############################
+ARCH ?= $(shell uname -m)
+ifeq ($(ARCH), x86_64)
+	ARCH=amd64
+endif
 CLUSTERS_NUMBER ?= 2
 CLUSTER_IDS = $(shell seq $(CLUSTERS_NUMBER))
 CLUSTER_NAME ?= test-gslb
@@ -31,6 +35,7 @@ CLUSTER_GEO_TAGS ?= eu us cz af ru ap uk ca
 CHART ?= k8gb/k8gb
 CLUSTER_GSLB_NETWORK = k3d-action-bridge-network
 CLUSTER_GSLB_GATEWAY = docker network inspect ${CLUSTER_GSLB_NETWORK} -f '{{ (index .IPAM.Config 0).Gateway }}'
+FULL_LOCAL_SETUP_WITH_APPS ?= true
 GSLB_DOMAIN ?= cloud.example.com
 REPO := absaoss/k8gb
 SHELL := bash
@@ -40,9 +45,10 @@ HELM_ARGS ?=
 K8GB_COREDNS_IP ?= kubectl get svc k8gb-coredns -n k8gb -o custom-columns='IP:spec.clusterIP' --no-headers
 LOG_FORMAT ?= simple
 LOG_LEVEL ?= debug
-CONTROLLER_GEN_VERSION  ?= v0.8.0
+CONTROLLER_GEN_VERSION  ?= v0.16.5
 GOLIC_VERSION  ?= v0.7.2
-GOKART_VERSION ?= v0.4.0
+GOLANGCI_VERSION ?= v1.60.3
+ISTIO_VERSION ?= v1.23.3
 POD_NAMESPACE ?= k8gb
 CLUSTER_GEO_TAG ?= eu
 EXT_GSLB_CLUSTERS_GEO_TAGS ?= us
@@ -80,6 +86,7 @@ STABLE_VERSION := "stable"
 BUNDLE_IMG ?= controller-bundle:$(VERSION)
 
 NGINX_INGRESS_VALUES_PATH ?= deploy/ingress/nginx-ingress-values.yaml
+ISTIO_INGRESS_VALUES_PATH ?= deploy/ingress/istio-ingress-values.yaml
 
 # options for 'bundle-build'
 ifneq ($(origin CHANNELS), undefined)
@@ -103,7 +110,7 @@ all: help
 
 # check integrity
 .PHONY: check
-check: license lint gokart test ## Check project integrity
+check: license lint test ## Check project integrity
 
 .PHONY: clean-test-apps
 clean-test-apps:
@@ -120,7 +127,9 @@ debug-idea:
 demo: ## Execute end-to-end demo
 	@$(call demo-host, $(DEMO_URL))
 
-# spin-up local environment
+K8GB_LOCAL_VERSION ?= stable
+# Spin-up local environment. Deploys stable released version by default
+# Use `K8GB_LOCAL_VERSION=test make deploy-full-local-setup`
 .PHONY: deploy-full-local-setup
 deploy-full-local-setup: ensure-cluster-size ## Deploy full local multicluster setup (k3d >= 5.1.0)
 	@echo -e "\n$(YELLOW)Creating $$(( $(CLUSTERS_NUMBER) + 1 )) k8s clusters$(NC)"
@@ -128,8 +137,8 @@ deploy-full-local-setup: ensure-cluster-size ## Deploy full local multicluster s
 	@for c in $(CLUSTER_IDS); do \
 		$(MAKE) create-local-cluster CLUSTER_NAME=$(CLUSTER_NAME)$$c ;\
 	done
-
-	$(MAKE) deploy-stable-version DEPLOY_APPS=true
+	@if [ "$(K8GB_LOCAL_VERSION)" = test ]; then $(MAKE) release-images ; fi
+	$(MAKE) deploy-$(K8GB_LOCAL_VERSION)-version DEPLOY_APPS=$(FULL_LOCAL_SETUP_WITH_APPS)
 
 .PHONY: deploy-stable-version
 deploy-stable-version:
@@ -145,11 +154,11 @@ deploy-test-version: ## Upgrade k8gb to the test version on existing clusters
 
 	@for c in $(CLUSTER_IDS); do \
 		echo -e "\n$(CYAN)$(CLUSTER_NAME)$$c:$(NC)" ;\
-		k3d image import $(REPO):$(SEMVER)-amd64 -c $(CLUSTER_NAME)$$c ;\
+		k3d image import $(REPO):$(SEMVER)-$(ARCH) -c $(CLUSTER_NAME)$$c ;\
 	done
 
 	@for c in $(CLUSTER_IDS); do \
-		$(MAKE) deploy-local-cluster CLUSTER_ID=$$c VERSION=$(SEMVER)-amd64 CHART='./chart/k8gb' ;\
+		$(MAKE) deploy-local-cluster CLUSTER_ID=$$c VERSION=$(SEMVER)-$(ARCH) CHART='./chart/k8gb' ;\
 		kubectl apply -n k8gb -f ./deploy/test/coredns-tcp-svc.yaml ;\
 	done
 
@@ -171,7 +180,7 @@ deploy-local-cluster:
 	kubectl config use-context k3d-$(CLUSTER_NAME)$(CLUSTER_ID)
 
 	@echo -e "\n$(YELLOW)Create namespace $(NC)"
-	kubectl apply -f deploy/namespace.yaml
+	kubectl create namespace k8gb --dry-run=client -o yaml | kubectl apply -f -
 
 	@echo -e "\n$(YELLOW)Deploy GSLB operator from $(VERSION) $(NC)"
 	$(MAKE) deploy-k8gb-with-helm
@@ -181,6 +190,20 @@ deploy-local-cluster:
 	helm repo update
 	helm -n k8gb upgrade -i nginx-ingress nginx-stable/ingress-nginx \
 		--version 4.0.15 -f $(NGINX_INGRESS_VALUES_PATH)
+
+	@echo -e "\n$(YELLOW)Install Istio CRDs $(NC)"
+	kubectl create namespace istio-system --dry-run=client -o yaml | kubectl apply -f -
+	helm repo add --force-update istio https://istio-release.storage.googleapis.com/charts
+	helm repo update
+	helm upgrade -i istio-base istio/base -n istio-system --version "$(ISTIO_VERSION)"
+
+	@echo -e "\n$(YELLOW)Install Istiod $(NC)"
+	helm upgrade -i istiod istio/istiod -n istio-system --version "$(ISTIO_VERSION)" --wait
+
+	@echo -e "\n$(YELLOW)Install Istio Ingress Gateway $(NC)"
+	kubectl create namespace istio-ingress --dry-run=client -o yaml | kubectl apply -f -
+	helm upgrade -i istio-ingressgateway istio/gateway -n istio-ingress \
+		--version "$(ISTIO_VERSION)" -f $(ISTIO_INGRESS_VALUES_PATH)
 
 	@if [ "$(DEPLOY_APPS)" = true ]; then $(MAKE) deploy-test-apps ; fi
 
@@ -192,14 +215,25 @@ deploy-local-cluster:
 .PHONY: deploy-test-apps
 deploy-test-apps: ## Deploy Podinfo (example app) and Apply Gslb Custom Resources
 	@echo -e "\n$(YELLOW)Deploy GSLB cr $(NC)"
-	kubectl apply -f deploy/crds/test-namespace.yaml
-	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr.yaml)
-	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_failover.yaml)
+	kubectl apply -f deploy/crds/test-namespace-ingress.yaml
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_roundrobin_ingress_ref.yaml)
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_failover_ingress_ref.yaml)
+
+	kubectl apply -f deploy/crds/test-namespace-istio.yaml
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_roundrobin_istio.yaml)
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_failover_istio.yaml)
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_notfound_istio.yaml)
+	$(call apply-cr,deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_unhealthy_istio.yaml)
 
 	@echo -e "\n$(YELLOW)Deploy podinfo $(NC)"
 	kubectl apply -f deploy/test-apps
 	helm repo add podinfo https://stefanprodan.github.io/podinfo
 	helm upgrade --install frontend --namespace test-gslb -f deploy/test-apps/podinfo/podinfo-values.yaml \
+		--set ui.message="`$(call get-cluster-geo-tag)`" \
+		--set image.repository="$(PODINFO_IMAGE_REPO)" \
+		podinfo/podinfo \
+		--version 5.1.1
+	helm upgrade --install frontend --namespace test-gslb-istio -f deploy/test-apps/podinfo/podinfo-values.yaml \
 		--set ui.message="`$(call get-cluster-geo-tag)`" \
 		--set image.repository="$(PODINFO_IMAGE_REPO)" \
 		podinfo/podinfo \
@@ -228,12 +262,11 @@ deploy-k8gb-with-helm:
 		--set k8gb.log.level=$(LOG_LEVEL) \
 		--set rfc2136.enabled=true \
 		--set k8gb.edgeDNSServers[0]=$(shell $(CLUSTER_GSLB_GATEWAY)):1053 \
-		--set externaldns.image=absaoss/external-dns:rfc-ns1 \
-		--wait --timeout=2m0s
+		--wait --timeout=10m0s
 
 .PHONY: deploy-gslb-operator
 deploy-gslb-operator: ## Deploy k8gb operator
-	kubectl apply -f deploy/namespace.yaml
+	kubectl create namespace k8gb --dry-run=client -o yaml | kubectl apply -f -
 	cd chart/k8gb && helm dependency update
 	helm -n k8gb upgrade -i k8gb chart/k8gb -f $(VALUES_YAML) $(HELM_ARGS) \
 		--set k8gb.log.format=$(LOG_FORMAT)
@@ -337,11 +370,11 @@ docker-push: test
 
 .PHONY: init-failover
 init-failover:
-	$(call init-test-strategy, "deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_failover.yaml")
+	$(call init-test-strategy, "deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_failover_ingress_ref.yaml")
 
 .PHONY: init-round-robin
 init-round-robin:
-	$(call init-test-strategy, "deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr.yaml")
+	$(call init-test-strategy, "deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_roundrobin_ingress_ref.yaml")
 
 # creates infoblox secret in current cluster
 .PHONY: infoblox-secret
@@ -349,12 +382,6 @@ infoblox-secret:
 	kubectl -n k8gb create secret generic infoblox \
 		--from-literal=INFOBLOX_WAPI_USERNAME=$${WAPI_USERNAME} \
 		--from-literal=INFOBLOX_WAPI_PASSWORD=$${WAPI_PASSWORD}
-
-# GoKart - Go Security Static Analysis
-# see: https://github.com/praetorian-inc/gokart
-.PHONY: gokart
-gokart:
-	$(call gokart,--globalsTainted --verbose)
 
 # updates source code with license headers
 .PHONY: license
@@ -373,7 +400,7 @@ ns1-secret:
 .PHONY: lint
 lint:
 	@echo -e "\n$(YELLOW)Running the linters$(NC)"
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	$(GOBIN)/golangci-lint run
 
 # retrieves all targets
@@ -389,13 +416,14 @@ k8gb: lint
 
 .PHONY: mocks
 mocks:
-	go install github.com/golang/mock/mockgen@v1.5.0
+	go install go.uber.org/mock/mockgen@v0.4.0
 	mockgen -package=mocks -destination=controllers/mocks/assistant_mock.go -source=controllers/providers/assistant/assistant.go Assistant
 	mockgen -package=mocks -destination=controllers/mocks/infoblox-client_mock.go -source=controllers/providers/dns/infoblox-client.go InfobloxClient
 	mockgen -package=mocks -destination=controllers/mocks/infoblox-connection_mock.go github.com/infobloxopen/infoblox-go-client IBConnector
 	mockgen -package=mocks -destination=controllers/mocks/manager_mock.go sigs.k8s.io/controller-runtime/pkg/manager Manager
 	mockgen -package=mocks -destination=controllers/mocks/client_mock.go sigs.k8s.io/controller-runtime/pkg/client Client
 	mockgen -package=mocks -destination=controllers/mocks/resolver_mock.go -source=controllers/depresolver/resolver.go GslbResolver
+	mockgen -package=mocks -destination=controllers/mocks/refresolver_mock.go -source=controllers/refresolver/refresolver.go GslbRefResolver
 	mockgen -package=mocks -destination=controllers/mocks/provider_mock.go -source=controllers/providers/dns/dns.go Provider
 	$(call golic)
 
@@ -452,7 +480,21 @@ terratest: # Run terratest suite
 		echo -e "$(RED)Make sure you run the tests against at least two running clusters$(NC)" ;\
 		exit 1;\
 	fi
-	cd terratest/test/ && go mod download && CLUSTERS_NUMBER=$(RUNNING_CLUSTERS) go test -v -timeout 15m -parallel=12 --tags=$(TEST_TAGS)
+	cd terratest/test/ && go mod download && CLUSTERS_NUMBER=$(RUNNING_CLUSTERS) go test -v -timeout 25m -parallel=12 --tags=$(TEST_TAGS)
+
+# executes chainsaw e2e tests
+.PHONY: chainsaw
+chainsaw:
+	mkdir -p chainsaw/kubeconfig
+	k3d kubeconfig get test-gslb1 > chainsaw/kubeconfig/eu.config
+	k3d kubeconfig get test-gslb2 > chainsaw/kubeconfig/us.config
+	@$(eval RUNNING_CLUSTERS := $(shell k3d cluster list --no-headers | grep $(CLUSTER_NAME) -c))
+	@if [ "$(RUNNING_CLUSTERS)" -lt 2 ] ; then \
+		echo -e "$(RED)Make sure you run the tests against at least two running clusters$(NC)" ;\
+		exit 1;\
+	fi
+	cd chainsaw && CLUSTERS_NUMBER=$(RUNNING_CLUSTERS) chainsaw test --config ./config.yaml --values ./values.yaml
+	rm -r chainsaw/kubeconfig
 
 .PHONY: website
 website:
@@ -482,9 +524,9 @@ define deploy-edgedns
 endef
 
 define apply-cr
-	sed -i 's/cloud\.example\.com/$(GSLB_DOMAIN)/g' "$1"
-	kubectl apply -f "$1"
-	git checkout -- "$1"
+	sed 's/cloud\.example\.com/$(GSLB_DOMAIN)/g' "$1" > "$1-cr"
+	-kubectl apply -f "$1-cr"
+	-rm "$1-cr"
 endef
 
 define get-cluster-geo-tag
@@ -547,11 +589,6 @@ define install-controller-gen
 	@go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION)
 endef
 
-define gokart
-	@go install github.com/praetorian-inc/gokart@$(GOKART_VERSION)
-	$(GOBIN)/gokart scan $1
-endef
-
 define golic
 	@go install github.com/AbsaOSS/golic@$(GOLIC_VERSION)
 	$(GOBIN)/golic inject $1
@@ -559,9 +596,9 @@ endef
 
 define debug
 	$(call manifest)
-	kubectl apply -f deploy/crds/test-namespace.yaml
+	kubectl apply -f deploy/crds/test-namespace-ingress.yaml
 	kubectl apply -f ./chart/k8gb/templates/k8gb.absa.oss_gslbs.yaml
-	kubectl apply -f ./deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr.yaml
+	kubectl apply -f ./deploy/crds/k8gb.absa.oss_v1beta1_gslb_cr_roundrobin_ingress.yaml
 	dlv $1
 endef
 

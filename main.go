@@ -29,12 +29,14 @@ import (
 	"github.com/k8gb-io/k8gb/controllers/providers/dns"
 	"github.com/k8gb-io/k8gb/controllers/providers/metrics"
 	"github.com/k8gb-io/k8gb/controllers/tracing"
+	istio "istio.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	ctrl "sigs.k8s.io/controller-runtime"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 	externaldns "sigs.k8s.io/external-dns/endpoint"
 	// +kubebuilder:scaffold:imports
@@ -48,8 +50,8 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(runtimescheme))
-
 	utilruntime.Must(k8gbv1beta1.AddToScheme(runtimescheme))
+	utilruntime.Must(istio.AddToScheme(runtimescheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -82,11 +84,12 @@ func run() error {
 	ctrl.SetLogger(logging.NewLogrAdapter(log))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             runtimescheme,
-		MetricsBindAddress: config.MetricsAddress,
-		Port:               9443,
-		LeaderElection:     false,
-		LeaderElectionID:   "8020e9ff.absa.oss",
+		Scheme: runtimescheme,
+		Metrics: metricsserver.Options{
+			BindAddress: config.MetricsAddress,
+		},
+		LeaderElection:   false,
+		LeaderElectionID: "8020e9ff.absa.oss",
 	})
 	if err != nil {
 		log.Err(err).Msg("Unable to create k8gb operator manager")

@@ -27,14 +27,23 @@
                 "ns1": {
                     "$ref": "#/definitions/Ns1"
                 },
-                "openshift": {
-                    "$ref": "#/definitions/Openshift"
-                },
                 "rfc2136": {
                     "$ref": "#/definitions/Rfc2136"
                 },
+                "azuredns": {
+                    "$ref": "#/definitions/AzureDNS"
+                },
+                "cloudflare": {
+                    "$ref": "#/definitions/Cloudflare"
+                },
+                "openshift": {
+                    "$ref": "#/definitions/Openshift"
+                },
                 "tracing": {
                     "$ref": "#/definitions/Tracing"
+                },
+                "istio": {
+                    "$ref": "#/definitions/Istio"
                 }
             }
         },
@@ -107,6 +116,19 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "dnsPolicy": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "extraEnv": {
+                    "type": "array"
+                },
+                "extraVolumes": {
+                    "type": "array"
+                },
+                "extraVolumeMounts": {
+                    "type": "array"
+                },
                 "image": {
                     "type": "string",
                     "minLength": 1
@@ -142,12 +164,27 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "fleet": {
+                    "type": "object"
+                },
                 "imagePullSecrets": {
-                    "type": "array",
+                    "type": [
+                        "array",
+                        "null"
+                    ],
                     "items": {
-                        "type": "string",
-                        "minLength": 1
-                    }
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "description": "Name of secret"
+                            }
+                        }
+                    },
+                    "description": "ImagePullSecrets is a list of references to secrets in the same namespace to use for pulling any images in pods that reference this ServiceAccount. ImagePullSecrets are distinct from Secrets because Secrets can be mounted in the pod, but ImagePullSecrets are only accessed by the kubelet. More info: http://kubernetes.io/docs/user-guide/secrets#manually-specifying-an-imagepullsecret"
                 }
             },
             "title": "Global"
@@ -218,7 +255,10 @@
                     "minLength": 1
                 },
                 "imageTag": {
-                    "type": ["string", "null"]
+                    "type": [
+                        "string",
+                        "null"
+                    ]
                 },
                 "deployCrds": {
                     "type": "boolean"
@@ -257,8 +297,15 @@
                     "type": "integer",
                     "minimum": 0
                 },
+                "nsRecordTTL": {
+                    "type": "integer",
+                    "minimum": 0
+                },
                 "log": {
                     "$ref": "#/definitions/k8gbLog"
+                },
+                "coredns": {
+                    "$ref": "#/definitions/k8gbCoreDNS"
                 },
                 "splitBrainCheck": {
                     "type": "boolean"
@@ -269,6 +316,22 @@
                 },
                 "securityContext": {
                     "$ref": "#/definitions/k8gbSecurityContext"
+                },
+                "exposeMetrics": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "serviceMonitor": {
+                    "$ref": "#/definitions/k8gbServiceMonitor"
+                },
+                "validatingAdmissionPolicy": {
+                    "$ref": "#/definitions/k8gbValidatingAdmissionPolicy"
+                },
+                "podAnnotations": {
+                    "type": "object"
+                },
+                "podLabels": {
+                    "type": "object"
                 }
             },
             "required": [
@@ -285,13 +348,40 @@
             "additionalProperties": false,
             "properties": {
                 "format": {
-                    "enum": ["simple", "json"]
+                    "enum": [
+                        "simple",
+                        "json"
+                    ]
                 },
                 "level": {
-                    "enum": ["panic", "fatal", "error", "warn", "info", "debug", "trace"]
+                    "enum": [
+                        "panic",
+                        "fatal",
+                        "error",
+                        "warn",
+                        "info",
+                        "debug",
+                        "trace"
+                    ]
                 }
             },
             "title": "Log"
+        },
+        "k8gbCoreDNS": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "extra_plugins": {
+                    "type": [
+                        "array",
+                        "null"
+                    ]
+                },
+                "extraServerBlocks": {
+                    "type": "string"
+                }
+            },
+            "title": "k8gbCoredns"
         },
         "k8gbSecurityContext": {
             "type": "object",
@@ -312,6 +402,24 @@
                 }
             },
             "title": "k8gbSecurityContext"
+        },
+        "k8gbServiceMonitor": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "k8gbValidatingAdmissionPolicy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
         },
         "Ns1": {
             "type": "object",
@@ -348,6 +456,12 @@
                     "items": {
                         "$ref": "#/definitions/Rfc2136Opt"
                     }
+                },
+                "rfc2136auth": {
+                    "type": "object",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136auth"
+                    }
                 }
             },
             "required": [
@@ -366,7 +480,66 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 65535
+                }
+            },
+            "title": "Rfc2136Opt"
+        },
+        "Rfc2136auth": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "insecure": {
+                    "type": "object",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136authInsecure"
+                    }
                 },
+                "tsig": {
+                    "type": "object",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136authTsig"
+                    }
+                },
+                "gssTsig": {
+                    "type": "object",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136authGssTsig"
+                    }
+                }
+            },
+            "title": "Rfc2136auth"
+        },
+        "Rfc2136authInsecure": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            },
+            "title": "Rfc2136authInsecure"
+        },
+        "Rfc2136authTsig": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "tsigCreds": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136authTsigCreds"
+                    }
+                }
+            },
+            "title": "Rfc2136authTsig"
+        },
+        "Rfc2136authTsigCreds": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
                 "tsig-secret-alg": {
                     "type": "string",
                     "minLength": 1
@@ -376,7 +549,46 @@
                     "minLength": 1
                 }
             },
-            "title": "Rfc2136Opt"
+            "title": "Rfc2136authTsigCreds"
+        },
+        "Rfc2136authGssTsig": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "kerberosConfigMap": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "gssTsigCreds": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Rfc2136authGssTsigCreds"
+                    }
+                }
+            },
+            "title": "Rfc2136authGssTsig"
+        },
+        "Rfc2136authGssTsigCreds": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "kerberos-username": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "kerberos-password": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "kerberos-realm": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            },
+            "title": "Rfc2136authGssTsigCreds"
         },
         "Route53": {
             "type": "object",
@@ -390,9 +602,39 @@
                     "minLength": 2
                 },
                 "irsaRole": {
-                    "type": "string",
-                    "pattern": "^arn:aws:iam:.+$",
-                    "minLength": 20
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "pattern": "^arn:aws:iam:.+$",
+                            "minLength": 20
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "secret": {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "assumeRoleArn": {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "pattern": "^arn:aws:iam:.+$",
+                            "minLength": 20
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
@@ -400,6 +642,81 @@
                 "irsaRole"
             ],
             "title": "Route53"
+        },
+        "AzureDNS": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "authSecretName": {
+                    "type": "string",
+                    "default": "external-dns-secret-azure"
+                },
+                "createAuthSecret": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "tenantId": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "subscriptionId": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "resourceGroup": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "aadClientId": {
+                            "type": "string"
+                        },
+                        "aadClientSecret": {
+                            "type": "string"
+                        },
+                        "useManagedIdentityExtension": {
+                            "type": "boolean",
+                            "default": false
+                        },
+                        "userAssignedIdentityID": {
+                            "type": "string"
+                        },
+                        "useWorkloadIdentityExtension": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "title": "azuredns"
+        },
+        "Cloudflare": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "dnsRecordsPerPage": {
+                    "type": "integer"
+                },
+                "zoneID": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "enabled",
+                "zoneID"
+            ],
+            "title": "Cloudflare"
         },
         "Tracing": {
             "type": "object",
@@ -423,7 +740,10 @@
                     "pattern": "^(0(\\.\\d{1,3})?|1(\\.0)?)$"
                 },
                 "otelConfig": {
-                    "type": ["object", "null"],
+                    "type": [
+                        "object",
+                        "null"
+                    ],
                     "additionalProperties": true
                 },
                 "sidecarImage": {
@@ -437,6 +757,19 @@
                 "enabled"
             ],
             "title": "Tracing"
+        },
+        "Istio": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "title": "Istio"
         }
     }
 }

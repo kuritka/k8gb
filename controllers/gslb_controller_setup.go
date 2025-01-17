@@ -23,19 +23,22 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/k8gb-io/k8gb/controllers/depresolver"
+	"github.com/k8gb-io/k8gb/controllers/utils"
 
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
+	"github.com/k8gb-io/k8gb/controllers/depresolver"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 	externaldns "sigs.k8s.io/external-dns/endpoint"
 )
 
@@ -43,8 +46,10 @@ import (
 func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Figure out Gslb resource name to Reconcile when non controlled Name is updated
 
+	r.Recorder = mgr.GetEventRecorderFor("gslb-controller")
+
 	endpointMapHandler := handler.EnqueueRequestsFromMapFunc(
-		func(a client.Object) []reconcile.Request {
+		func(_ context.Context, a client.Object) []reconcile.Request {
 			gslbList := &k8gbv1beta1.GslbList{}
 			opts := []client.ListOption{
 				client.InNamespace(a.GetNamespace()),
@@ -55,29 +60,28 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				log.Info().Msg("Can't fetch gslb objects")
 				return nil
 			}
-			gslbName := ""
+			reconcileRequests := []reconcile.Request{}
+		GslbLoop:
 			for _, gslb := range gslbList.Items {
-				for _, rule := range gslb.Spec.Ingress.Rules {
-					for _, path := range rule.HTTP.Paths {
-						if path.Backend.Service != nil && path.Backend.Service.Name == a.GetName() {
-							gslbName = gslb.Name
+				for _, server := range gslb.Status.Servers {
+					for _, service := range server.Services {
+						if service.Name == a.GetName() {
+							reconcileRequests = append(reconcileRequests, reconcile.Request{
+								NamespacedName: types.NamespacedName{
+									Name:      gslb.Name,
+									Namespace: a.GetNamespace(),
+								},
+							})
+							continue GslbLoop
 						}
 					}
 				}
 			}
-			if len(gslbName) > 0 {
-				return []reconcile.Request{
-					{NamespacedName: types.NamespacedName{
-						Name:      gslbName,
-						Namespace: a.GetNamespace(),
-					}},
-				}
-			}
-			return nil
+			return reconcileRequests
 		})
 
 	ingressMapHandler := handler.EnqueueRequestsFromMapFunc(
-		func(a client.Object) []reconcile.Request {
+		func(_ context.Context, a client.Object) []reconcile.Request {
 			annotations := a.GetAnnotations()
 			if annotationValue, found := annotations[strategyAnnotation]; found {
 				c := mgr.GetClient()
@@ -90,8 +94,31 @@ func (r *GslbReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&k8gbv1beta1.Gslb{}).
 		Owns(&netv1.Ingress{}).
 		Owns(&externaldns.DNSEndpoint{}).
-		Watches(&source.Kind{Type: &corev1.Endpoints{}}, endpointMapHandler).
-		Watches(&source.Kind{Type: &netv1.Ingress{}}, ingressMapHandler).
+		Watches(&corev1.Endpoints{}, endpointMapHandler).
+		Watches(&netv1.Ingress{}, ingressMapHandler).
+		WithEventFilter(predicate.Funcs{
+			UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+				if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+					return true
+				}
+
+				// endpoints don't have state, therefore they don't have a generation
+				// but when their subsets change they must be be reconciled
+				gvk, err := apiutil.GVKForObject(e.ObjectOld, r.Scheme)
+				if err != nil {
+					log.Warn().Msg("could not fetch GroupVersionKind for object")
+				} else if gvk.Kind == "Endpoints" {
+					return true
+				}
+
+				// Ignore reconciliation in case nothing has changed in k8gb annotations
+				oldAnnotations := e.ObjectOld.GetAnnotations()
+				newAnnotations := e.ObjectNew.GetAnnotations()
+				reconcile := !utils.EqualPredefinedAnnotations(oldAnnotations, newAnnotations, k8gbAnnotations...)
+
+				return reconcile
+			},
+		}).
 		Complete(r)
 }
 
@@ -125,9 +152,8 @@ func (r *GslbReconciler) createGSLBFromIngress(c client.Client, a client.Object,
 	}
 	gslb := &k8gbv1beta1.Gslb{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   a.GetNamespace(),
-			Name:        a.GetName(),
-			Annotations: a.GetAnnotations(),
+			Namespace: a.GetNamespace(),
+			Name:      a.GetName(),
 		},
 		Spec: k8gbv1beta1.GslbSpec{
 			Ingress: k8gbv1beta1.FromV1IngressSpec(ingressToReuse.Spec),

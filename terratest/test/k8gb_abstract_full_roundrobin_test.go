@@ -26,31 +26,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func abstractTestFullRoundRobin(t *testing.T, n int) {
-	if n < 2 || n > 8 {
-		t.Logf("Use value of n that represents the number of clusters from interval [2,8]")
+func abstractTestFullRoundRobin(t *testing.T, testPrefix string, workflows []*utils.Workflow) {
+	if len(workflows) < 2 || len(workflows) > 8 {
+		t.Logf("Number of cluster must be in the interval [2,8]")
 		t.FailNow()
 	}
-	t.Logf(fmt.Sprintf("Running TestFullRoundRobin for %d clusters", n))
+	t.Logf(fmt.Sprintf("Running TestFullRoundRobin for %d clusters", len(workflows)))
 	tags := []string{"eu", "us", "cz", "af", "ru", "ap", "uk", "ca"}
 	var instances []*utils.Instance
 
-	t.Parallel()
-	const host = "roundrobin-test.cloud.example.com"
-	const gslbPath = "../examples/roundrobin2.yaml"
-
 	// start all the test apps on all the clusters
-	for i := 0; i < n; i += 1 {
-		instance, er := utils.NewWorkflow(t, fmt.Sprintf("k3d-test-gslb%d", i+1), 5053+i).
-			WithGslb(gslbPath, host).
-			WithTestApp(tags[i]).
-			Start()
+	for i, workflow := range workflows {
+		workflow = workflow.WithTestApp(tags[i])
+		instance, er := workflow.Start()
 		require.NoError(t, er)
 		instances = append(instances, instance)
 		defer instance.Kill()
 	}
 	var err error
-	t.Run(fmt.Sprintf("round-robin on %d concurrent clusters with podinfo running", n), func(t *testing.T) {
+	t.Run(fmt.Sprintf("%s round-robin on %d concurrent clusters with podinfo running", testPrefix, len(workflows)), func(t *testing.T) {
 		for _, ins := range instances {
 			err = ins.WaitForAppIsRunning()
 			require.NoError(t, err)
@@ -62,13 +56,13 @@ func abstractTestFullRoundRobin(t *testing.T, n int) {
 	for _, ins := range instances {
 		workingTargets = append(workingTargets, ins.GetLocalTargets()...)
 	}
-	t.Run(fmt.Sprintf("all %d clusters should be interconnected", n), func(t *testing.T) {
+	t.Run(fmt.Sprintf("%s all %d clusters should be interconnected", testPrefix, len(workflows)), func(t *testing.T) {
 		allShouldExpectTheseTargets(t, instances, workingTargets)
 	})
 
 	// kill the apps on clusters one by one and expect less and less targets to be available
 	for i, instance := range instances {
-		t.Run(fmt.Sprintf("kill podinfo on cluster %d (%s)", i+1, tags[i]), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s kill podinfo on cluster %d (%s)", testPrefix, i+1, tags[i]), func(t *testing.T) {
 			workingTargets = distinct(subtract(workingTargets, instance.GetLocalTargets()))
 			t.Logf("New expected targets: %v", workingTargets)
 			instance.StopTestApp()
@@ -78,7 +72,7 @@ func abstractTestFullRoundRobin(t *testing.T, n int) {
 
 	// start the test apps again on each cluster and check if the targets start appearing
 	for i, instance := range instances {
-		t.Run(fmt.Sprintf("start podinfo on cluster %d (%s)", i+1, tags[i]), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s start podinfo on cluster %d (%s)", testPrefix, i+1, tags[i]), func(t *testing.T) {
 			instance.StartTestApp()
 			workingTargets = distinct(append(workingTargets, instance.GetLocalTargets()...))
 			t.Logf("New expected targets: %v", workingTargets)
