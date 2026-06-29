@@ -1,0 +1,130 @@
+site_name: K8GB - Kubernetes Global Balancer
+site_description: Cloud native global load balancing solution for Kubernetes
+site_url: https://k8gb.io
+repo_url: https://github.com/k8gb-io/k8gb
+repo_name: k8gb-io/k8gb
+edit_uri: edit/master/docs/
+
+nav:
+  - Documentation:
+    - Home: index.md
+    - Getting Started: intro.md
+    - Installation & Configuration: tutorials.md
+    - Components: components.md
+    - Load Balancing Strategy: strategy.md
+    - DNS Providers:
+      - AWS Route53: deploy_route53.md
+      - Azure DNS: deploy_azuredns.md
+      - Google Cloud DNS: provider_gcp.md
+      - Infoblox: deploy_infoblox.md
+      - NS1: deploy_ns1.md
+      - Windows DNS: deploy_windowsdns.md
+      - Cloudflare: deploy_cloudflare.md
+      - RFC2136/Bind9: provider_rfc2136.md
+    - Configuration:
+      - Resource References: resource_ref.md
+      - Address Discovery: address_discovery.md
+      - Exposed Hostnames: exposed-hostnames.md
+      - Dynamic Geotags: dynamic_geotags.md
+      - Multi-zone Setup: multizone.md
+      - Exposing DNS: exposing_dns.md
+    - Development & Testing:
+      - Local Setup: local.md
+      - Local with Kuar: local-kuar.md
+      - Rollback Process: rollback_procedures.md
+    - Monitoring and Observability:
+      - Metrics: metrics.md
+      - Traces: traces.md
+    - Platform Integrations:
+      - Admiralty: admiralty.md
+      - Liqo: liqo.md
+      - Rancher: rancher.md
+      - Crossplane Global Control Plane: crossplane_globalapp.md
+      - Load Balancer: lbservice-integration.md
+    - Advanced:
+      - Split-Brain Scenarios: splitbrain.md
+      - Service Upgrade: service_upgrade.md
+      - Migration Acceptance Tests: migration_acceptance.md
+      - WRR Caveats: wrr_caveats.md
+      - External DNS Proxy: proxy_externaldns.md
+    - Community:
+      - Contributing: CONTRIBUTING.md
+      - Adopters: ADOPTERS.md
+  - Blog:
+    - blog/index.md
+theme:
+  name: material
+  custom_dir: overrides
+  logo: images/k8gb-icon-color.svg
+  favicon: images/k8gb-icon-color.svg
+  palette:
+    - scheme: default
+      primary: deep red
+      accent: red
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep red
+      accent: red
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - blog:
+      blog_dir: blog
+      blog_toc: true
+      post_date_format: full
+      post_url_date_format: yyyy/MM/dd
+      post_url_format: "{date}/{slug}"
+      archive_date_format: MMMM yyyy
+      categories_allowed:
+        - Releases
+        - Tutorials
+        - Community
+        - Technical Deep Dive
+        - Integrations
+      authors_profiles: true
+      pagination_per_page: 10
+      post_readtime: true
+      post_readtime_words_per_minute: 200
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - mkdocs-simple-hooks:
+      hooks:
+        on_page_markdown: "docs.link_fixer:fix_links"
+extra_css:
+  - stylesheets/extra.css
+extra:
+  version:
+    provider: mike
+copyright: © 2025 The Linux Foundation. All rights reserved. The Linux Foundation has registered trademarks and uses trademarks. For a list of trademarks of The Linux Foundation, please see our <a href="https://www.linuxfoundation.org/legal/trademark-usage">Trademark Usage</a> page.

@@ -1,7 +1,7 @@
 package controllers
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import (
 
 	"github.com/k8gb-io/k8gb/controllers/utils"
 
-	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
+	k8gbv1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,21 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func (r *GslbReconciler) gslbIngress(gslb *k8gbv1beta1.Gslb) (*netv1.Ingress, error) {
-	annotations := make(map[string]string)
-	annotations[strategyAnnotation] = gslb.Spec.Strategy.Type
-	if gslb.Spec.Strategy.PrimaryGeoTag != "" {
-		annotations[primaryGeoTagAnnotation] = gslb.Spec.Strategy.PrimaryGeoTag
-	}
+func (r *GslbReconciler) createIngressFromGslb(gslb *k8gbv1beta1io.Gslb) (*netv1.Ingress, error) {
 	ingress := &netv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        gslb.Name,
-			Namespace:   gslb.Namespace,
-			Annotations: annotations,
+			Name:      gslb.Name,
+			Namespace: gslb.Namespace,
 		},
-		Spec: k8gbv1beta1.ToV1IngressSpec(gslb.Spec.Ingress),
+		Spec: k8gbv1beta1io.ToV1IngressSpec(gslb.Spec.Ingress),
 	}
-
+	utils.SetCommonGslbLabels(ingress)
 	err := controllerutil.SetControllerReference(gslb, ingress, r.Scheme)
 	if err != nil {
 		return nil, err
@@ -54,24 +48,24 @@ func (r *GslbReconciler) gslbIngress(gslb *k8gbv1beta1.Gslb) (*netv1.Ingress, er
 	return ingress, err
 }
 
-func (r *GslbReconciler) saveIngress(instance *k8gbv1beta1.Gslb, i *netv1.Ingress) error {
+func (r *GslbReconciler) saveDependentIngress(ctx context.Context, instance *k8gbv1beta1io.Gslb, i *netv1.Ingress) error {
 	found := &netv1.Ingress{}
-	err := r.Get(context.TODO(), types.NamespacedName{
+	err := r.Get(ctx, types.NamespacedName{
 		Name:      instance.Name,
 		Namespace: instance.Namespace,
 	}, found)
 	if err != nil && errors.IsNotFound(err) {
 
 		// Create the service
-		log.Info().
+		r.Logger.Info().
 			Str("namespace", i.Namespace).
 			Str("ingress", i.Name).
 			Msg("Creating a new Ingress")
-		err = r.Create(context.TODO(), i)
+		err = r.Create(ctx, i)
 
 		if err != nil {
 			// Creation failed
-			log.Err(err).
+			r.Logger.Err(err).
 				Str("namespace", i.Namespace).
 				Str("name", i.Name).
 				Msg("Failed to create new Ingress")
@@ -81,17 +75,17 @@ func (r *GslbReconciler) saveIngress(instance *k8gbv1beta1.Gslb, i *netv1.Ingres
 		return nil
 	} else if err != nil {
 		// Error that isn't due to the service not existing
-		log.Err(err).Msg("Failed to get Ingress")
+		r.Logger.Err(err).Msg("Failed to get Ingress")
 		return err
 	}
 
 	// Update existing object with new spec and annotations
 	if !ingressEqual(found, i) {
 		found.Spec = i.Spec
-		found.Annotations = utils.MergeAnnotations(found.Annotations, i.Annotations, k8gbAnnotations...)
-		err = r.Update(context.TODO(), found)
+		utils.SetCommonGslbLabels(found)
+		err = r.Update(ctx, found)
 		if errors.IsConflict(err) {
-			log.Info().
+			r.Logger.Info().
 				Str("namespace", found.Namespace).
 				Str("name", found.Name).
 				Msg("Ingress has been modified outside of controller, retrying reconciliation")
@@ -99,7 +93,7 @@ func (r *GslbReconciler) saveIngress(instance *k8gbv1beta1.Gslb, i *netv1.Ingres
 		}
 		if err != nil {
 			// Update failed
-			log.Err(err).
+			r.Logger.Err(err).
 				Str("namespace", found.Namespace).
 				Str("name", found.Name).
 				Msg("Failed to update Ingress")
@@ -111,8 +105,5 @@ func (r *GslbReconciler) saveIngress(instance *k8gbv1beta1.Gslb, i *netv1.Ingres
 }
 
 func ingressEqual(ing1 *netv1.Ingress, ing2 *netv1.Ingress) bool {
-	if !utils.EqualPredefinedAnnotations(ing1.Annotations, ing2.Annotations, k8gbAnnotations...) {
-		return false
-	}
 	return reflect.DeepEqual(ing1.Spec, ing2.Spec)
 }

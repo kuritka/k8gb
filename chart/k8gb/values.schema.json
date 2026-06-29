@@ -15,26 +15,16 @@
                 "externaldns": {
                     "$ref": "#/definitions/Externaldns"
                 },
+                "extdns": {
+                    "type": "object",
+                    "description": "Values for the external-dns upstream chart. See https://github.com/kubernetes-sigs/external-dns/tree/master/charts/external-dns for all available options",
+                    "additionalProperties": true
+                },
                 "coredns": {
                     "$ref": "#/definitions/Coredns"
                 },
                 "infoblox": {
                     "$ref": "#/definitions/Infoblox"
-                },
-                "route53": {
-                    "$ref": "#/definitions/Route53"
-                },
-                "ns1": {
-                    "$ref": "#/definitions/Ns1"
-                },
-                "rfc2136": {
-                    "$ref": "#/definitions/Rfc2136"
-                },
-                "azuredns": {
-                    "$ref": "#/definitions/AzureDNS"
-                },
-                "cloudflare": {
-                    "$ref": "#/definitions/Cloudflare"
                 },
                 "openshift": {
                     "$ref": "#/definitions/Openshift"
@@ -44,8 +34,49 @@
                 },
                 "istio": {
                     "$ref": "#/definitions/Istio"
+                },
+                "gatewayapi": {
+                    "$ref": "#/definitions/GatewayAPI"
                 }
             }
+        },
+        "Resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "requests": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "memory": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "cpu": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                },
+                "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "memory": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "cpu": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            },
+            "required": [
+                "requests"
+            ],
+            "title": "Resources"
         },
         "Coredns": {
             "type": "object",
@@ -62,6 +93,12 @@
                 },
                 "serviceAccount": {
                     "$ref": "#/definitions/CorednsServiceAccount"
+                },
+                "resources": {
+                    "$ref": "#/definitions/Resources"
+                },
+                "corefile": {
+                    "$ref": "#/definitions/CorednsCorefile"
                 }
             },
             "title": "Coredns"
@@ -112,6 +149,38 @@
             ],
             "title": "ServiceAccount"
         },
+        "CorednsCorefile": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "reload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "interval": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "jitter": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "required": [
+                        "enabled",
+                        "interval",
+                        "jitter"
+                    ]
+                }
+            },
+            "title": "Corefile"
+        },
         "Externaldns": {
             "type": "object",
             "additionalProperties": false,
@@ -138,6 +207,9 @@
                 },
                 "securityContext": {
                     "$ref": "#/definitions/ExternaldnsSecurityContext"
+                },
+                "resources": {
+                    "$ref": "#/definitions/Resources"
                 }
             },
             "title": "Externaldns"
@@ -238,6 +310,10 @@
                 "httpPoolConnections": {
                     "type": "integer",
                     "minimum": 0
+                },
+                "dnsView": {
+                  "type": "string",
+                  "description": "DNS view to use for zone operations"
                 }
             },
             "required": [
@@ -263,20 +339,81 @@
                 "deployCrds": {
                     "type": "boolean"
                 },
+                "installLegacyCrds": {
+                    "type": "boolean"
+                },
                 "deployRbac": {
                     "type": "boolean"
                 },
-                "dnsZone": {
-                    "format": "idn-hostname",
-                    "minLength": 1
+                "dynamicZones": {
+                    "type": "boolean"
                 },
-                "dnsZoneNegTTL": {
-                    "type": "integer",
-                    "minimum": 0
+                "extraVolumeMounts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "mountPath"],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "mountPath": {
+                                "type": "string"
+                            },
+                            "readOnly": {
+                                "type": "boolean"
+                            },
+                            "subPath": {
+                                "type": "string"
+                            }
+                        },
+                        "additionalProperties": false
+                    }
                 },
-                "edgeDNSZone": {
-                    "format": "idn-hostname",
-                    "minLength": 1
+                "extraVolumes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "configMap": {
+                                "type": "object",
+                                "required": ["name"],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "optional": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "secret": {
+                                "type": "object",
+                                "required": ["secretName"],
+                                "properties": {
+                                    "secretName": {
+                                        "type": "string"
+                                    },
+                                    "optional": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "dnsZones": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/k8gbDnsZone"
+                    }
                 },
                 "edgeDNSServers": {
                     "type": "array",
@@ -291,7 +428,7 @@
                 },
                 "extGslbClustersGeoTags": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 0
                 },
                 "reconcileRequeueSeconds": {
                     "type": "integer",
@@ -303,9 +440,6 @@
                 },
                 "log": {
                     "$ref": "#/definitions/k8gbLog"
-                },
-                "coredns": {
-                    "$ref": "#/definitions/k8gbCoreDNS"
                 },
                 "splitBrainCheck": {
                     "type": "boolean"
@@ -332,14 +466,62 @@
                 },
                 "podLabels": {
                     "type": "object"
+                },
+                "resources": {
+                    "$ref": "#/definitions/Resources"
+                },
+                "tolerations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "operator": {
+                                "type": "string",
+                                "enum": ["Exists", "Equal"]
+                            },
+                            "value": {
+                                "type": "string"
+                            },
+                            "effect": {
+                                "type": "string",
+                                "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+                            },
+                            "tolerationSeconds": {
+                                "type": "integer"
+                            }
+                        },
+                        "anyOf": [
+                            {
+                                "properties": {
+                                    "operator": {"const": "Exists"}
+                                },
+                                "not": {
+                                    "required": ["value"]
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "operator": {"const": "Equal"}
+                                },
+                                "required": ["value"]
+                            },
+                            {
+                                "not": {
+                                    "required": ["operator"]
+                                }
+                            }
+                        ],
+                        "additionalProperties": false
+                    }
                 }
             },
             "required": [
                 "clusterGeoTag",
-                "extGslbClustersGeoTags",
-                "dnsZone",
                 "edgeDNSServers",
-                "edgeDNSZone"
+                "dnsZones"
             ],
             "title": "k8gb"
         },
@@ -366,22 +548,6 @@
                 }
             },
             "title": "Log"
-        },
-        "k8gbCoreDNS": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "extra_plugins": {
-                    "type": [
-                        "array",
-                        "null"
-                    ]
-                },
-                "extraServerBlocks": {
-                    "type": "string"
-                }
-            },
-            "title": "k8gbCoredns"
         },
         "k8gbSecurityContext": {
             "type": "object",
@@ -421,18 +587,40 @@
                 }
             }
         },
-        "Ns1": {
+        "k8gbDnsZone": {
             "type": "object",
-            "additionalProperties": false,
             "properties": {
-                "enabled": {
-                    "type": "boolean"
+                "loadBalancedZone": {
+                    "type": "string",
+                    "format": "idn-hostname"
                 },
-                "ignoreSSL": {
-                    "type": "boolean"
+                "parentZone": {
+                    "type": "string",
+                    "format": "idn-hostname"
+                },
+                "dnsZoneNegTTL": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 300
+                },
+                "extraPlugins": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "extraServerBlocks": {
+                    "type": "string"
                 }
             },
-            "title": "Ns1"
+            "required": [
+                "loadBalancedZone",
+                "parentZone"
+            ]
         },
         "Openshift": {
             "type": "object",
@@ -443,280 +631,6 @@
                 }
             },
             "title": "Openshift"
-        },
-        "Rfc2136": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "rfc2136Opts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136Opt"
-                    }
-                },
-                "rfc2136auth": {
-                    "type": "object",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136auth"
-                    }
-                }
-            },
-            "required": [
-                "rfc2136Opts"
-            ],
-            "title": "Rfc2136"
-        },
-        "Rfc2136Opt": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "host": {
-                    "format": "idn-hostname"
-                },
-                "port": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 65535
-                }
-            },
-            "title": "Rfc2136Opt"
-        },
-        "Rfc2136auth": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "insecure": {
-                    "type": "object",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136authInsecure"
-                    }
-                },
-                "tsig": {
-                    "type": "object",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136authTsig"
-                    }
-                },
-                "gssTsig": {
-                    "type": "object",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136authGssTsig"
-                    }
-                }
-            },
-            "title": "Rfc2136auth"
-        },
-        "Rfc2136authInsecure": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                }
-            },
-            "title": "Rfc2136authInsecure"
-        },
-        "Rfc2136authTsig": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "default": true
-                },
-                "tsigCreds": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136authTsigCreds"
-                    }
-                }
-            },
-            "title": "Rfc2136authTsig"
-        },
-        "Rfc2136authTsigCreds": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "tsig-secret-alg": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "tsig-keyname": {
-                    "type": "string",
-                    "minLength": 1
-                }
-            },
-            "title": "Rfc2136authTsigCreds"
-        },
-        "Rfc2136authGssTsig": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "kerberosConfigMap": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "gssTsigCreds": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/Rfc2136authGssTsigCreds"
-                    }
-                }
-            },
-            "title": "Rfc2136authGssTsig"
-        },
-        "Rfc2136authGssTsigCreds": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "kerberos-username": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "kerberos-password": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "kerberos-realm": {
-                    "type": "string",
-                    "minLength": 1
-                }
-            },
-            "title": "Rfc2136authGssTsigCreds"
-        },
-        "Route53": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "hostedZoneID": {
-                    "type": "string",
-                    "minLength": 2
-                },
-                "irsaRole": {
-                    "oneOf": [
-                        {
-                            "type": "string",
-                            "pattern": "^arn:aws:iam:.+$",
-                            "minLength": 20
-                        },
-                        {
-                            "type": "null"
-                        }
-                    ]
-                },
-                "secret": {
-                    "oneOf": [
-                        {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        {
-                            "type": "null"
-                        }
-                    ]
-                },
-                "assumeRoleArn": {
-                    "oneOf": [
-                        {
-                            "type": "string",
-                            "pattern": "^arn:aws:iam:.+$",
-                            "minLength": 20
-                        },
-                        {
-                            "type": "null"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "hostedZoneID",
-                "irsaRole"
-            ],
-            "title": "Route53"
-        },
-        "AzureDNS": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "authSecretName": {
-                    "type": "string",
-                    "default": "external-dns-secret-azure"
-                },
-                "createAuthSecret": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        },
-                        "tenantId": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "subscriptionId": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "resourceGroup": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "aadClientId": {
-                            "type": "string"
-                        },
-                        "aadClientSecret": {
-                            "type": "string"
-                        },
-                        "useManagedIdentityExtension": {
-                            "type": "boolean",
-                            "default": false
-                        },
-                        "userAssignedIdentityID": {
-                            "type": "string"
-                        },
-                        "useWorkloadIdentityExtension": {
-                            "type": "boolean",
-                            "default": false
-                        }
-                    }
-                }
-            },
-            "required": [
-                "enabled"
-            ],
-            "title": "azuredns"
-        },
-        "Cloudflare": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "dnsRecordsPerPage": {
-                    "type": "integer"
-                },
-                "zoneID": {
-                    "type": "string"
-                }
-            },
-            "required": [
-                "enabled",
-                "zoneID"
-            ],
-            "title": "Cloudflare"
         },
         "Tracing": {
             "type": "object",
@@ -770,6 +684,19 @@
                 "enabled"
             ],
             "title": "Istio"
+        },
+        "GatewayAPI": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "title": "GatewayAPI"
         }
     }
 }

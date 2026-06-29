@@ -29,20 +29,23 @@
 - [Release process](#release-process)
   - [Signed releases](#signed-releases)
   - [Software bill of materials](#software-bill-of-materials)
+- [Governance](https://github.com/k8gb-io/k8gb/blob/master/GOVERNANCE.md)
 
-k8gb is licensed under [Apache 2 License](./LICENSE) and accepts contributions via GitHub pull requests.
+k8gb is licensed under [Apache 2 License](https://github.com/k8gb-io/k8gb/blob/master/LICENSE) and accepts contributions via GitHub pull requests.
 This document outlines the resources and guidelines necessary to follow by contributors to the k8gb project.
 
 ## Getting started
 
 - Fork the repository on GitHub
-- See the [local playground guide](/docs/local.md) for local dev environment setup
+- See the [local playground guide](local.md) for local dev environment setup
 
 ## Getting help
 
 Feel free to ask for help and join the discussions at [k8gb community discussions forum](https://github.com/k8gb-io/k8gb/discussions).
 We have [dedicated `#k8gb` channel on Cloud Native Computing Foundation (CNCF) Slack](https://cloud-native.slack.com/archives/C021P656HGB),
 and we can also actively monitoring [`#sig-multicluster` channel on Kubernetes Slack](https://kubernetes.slack.com/archives/C09R1PJR3).
+
+Another great way to get help is to attend the community meetings. Community meetings take place every other Wednesday from 13:00 CET to 13:30 CET [calendar](https://zoom-lfx.platform.linuxfoundation.org/meetings/k8gb?view=month). You can join the [Zoom Meeting](https://zoom-lfx.platform.linuxfoundation.org/meeting/92572060749?password=645f8346-1952-44fa-bd9b-45208260fc10).
 
 ## Reporting issues
 
@@ -141,13 +144,13 @@ There is a dedicated make target available for Goland:
 3. Attach debugger of your IDE to port `2345`.
 
 ## Metrics
-More info about k8gb metrics can be found in the [metrics.md](/docs/metrics.md) document.
+More info about k8gb metrics can be found in the [metrics.md](metrics.md) document.
 If you need to check and query the k8gb metrics locally, you can install a Prometheus in the local clusters using the `make deploy-prometheus` command.
 
 The deployed Prometheus scrapes metrics from the dedicated k8gb operator endpoint and makes them accessible via Prometheus web UI:
 
-- http://127.0.0.1:9080
-- http://127.0.0.1:9081
+- http://127.0.0.1:9090
+- http://127.0.0.1:9091
 
 All the metric data is ephemeral and will be lost with pod restarts.
 To uninstall Prometheus, run `make uninstall-prometheus`
@@ -240,7 +243,7 @@ When a commit is created in GitHub UI as a result of [accepted suggested change]
 
 ### Changelog
 
-The [CHANGELOG](CHANGELOG.md) is automatically generated from Github PRs and Issues during release.
+The [CHANGELOG](https://github.com/k8gb-io/k8gb/blob/master/CHANGELOG.md) is automatically generated from Github PRs and Issues during release.
 Use dedicated [keywords](https://docs.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in PR message or [manual PR and Issue linking](https://docs.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#manually-linking-a-pull-request-to-an-issue) for clean changelog generation.
 Issues and PRs should be also properly tagged with valid project tags ("bug", "enhancement", "wontfix", etc )
 
@@ -324,7 +327,7 @@ The happy path will look like:
 [Thu May 27 15:35:36 UTC 2021] ...
 ```
 
-The sources for demo helper images can be found [here](deploy/test-apps/curldemo/)
+The sources for demo helper images can be found [here](https://github.com/k8gb-io/k8gb/tree/master/deploy/test-apps/curldemo/)
 
 To enable verbose debug output declare `DEMO_DEBUG=1` like
 ```sh
@@ -340,6 +343,7 @@ release, e.g.
 ```
 chart/k8gb/README.md:![Version: v0.13.0](https://img.shields.io/badge/Version-v0.13.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.13.0](https://img.shields.io/badge/AppVersion-v0.13.0-informational?style=flat-square)
 ```
+* Ensure `stable` become `next`. Update `deploy/helm/stable.yaml` with `deploy/helm/next.yaml`.
 * Merge the Pull Request after the review approval (make sure the squash or rebase is used, merge commit will not trigger the release pipeline)
 * At this point a DRAFT release will be created on GitHub. After the [automatic tag](https://github.com/k8gb-io/k8gb/actions/workflows/cut_release.yaml) & [release pipeline](https://github.com/k8gb-io/k8gb/actions/workflows/release.yaml)
 have been successfully completed, you check the [release DRAFT](https://github.com/k8gb-io/k8gb/releases) and if it is OK, you click on the **"Publish release"** button.
@@ -352,22 +356,181 @@ Congratulations, the release is complete!
 
 ### Signed releases
 
-During the release process we generate also the provenance file that is compliant with
-https://in-toto.io/Statement/v0.1 schema. It contains the information about the github action run that was
-responsible for the release, but also other metadata about artifacts there were created and their signatures.
+During the release process we generate SLSA (Supply-chain Levels for Software Artifacts) Level 3 provenance
+attestations using the official [slsa-framework/slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator).
 
 This provenance file is signed itself and attached with the signature to the release artifacts. For signing
 the artifacts we use [`cosign`](https://github.com/sigstore/cosign) tool and private key stored as the
-repository secret. Public key is available in the repository itself in file [`cosign.pub`](./cosign.pub).
+repository secret. Public key is available in the repository itself in file [`cosign.pub`](https://github.com/k8gb-io/k8gb/blob/master/cosign.pub).
 This way anybody can verify the origin of arbitrary artifact. In order to regenerate the keys for cosign,
 one can run `cosign generate-key-pair`, use some passphrase and update the `COSIGN_{PRIVATE,PUBLIC}_KEY` &
-`COSIGN_PASSWORD` repo secret and also the content of `./cosign.pub` file.
+`COSIGN_PASSWORD` repo secret and also the content of [`cosign.pub`](https://github.com/k8gb-io/k8gb/blob/master/cosign.pub) file.
 
-All the container images that are produced during the build are also signed with `cosign` and the signatures
-are also pushed to the container registries (dockerhub). So that users of k8gb can introduce OPA policy that
-imposes such verification on our images. These signatures are stored in OCI format under predictable name
-that can be found using `cosign triangulate $IMAGE` command. However, `cosign verify ..` with our public key
-should be sufficient.
+#### SLSA Provenance
+
+The release artifacts include a `multiple.intoto.jsonl` file that contains SLSA provenance attestations
+compliant with the [in-toto Attestation Framework](https://in-toto.io/Statement/v0.1). This file provides:
+
+- **Build metadata**: Information about the GitHub Actions workflow that built the artifacts
+- **Material provenance**: Source code repository, commit SHA, and build environment details
+- **Artifact attestations**: Cryptographic signatures for all release binaries and archives
+- **Supply chain security**: Verifiable proof that artifacts weren't tampered with during build
+
+#### Artifact Signing
+
+For signing the artifacts we use [`cosign`](https://github.com/sigstore/cosign) tool with:
+- **Private key**: Stored as repository secret (`COSIGN_PRIVATE_KEY`)
+- **Public key**: Available in [`cosign.pub`](https://github.com/k8gb-io/k8gb/blob/master/cosign.pub) file
+- **Passphrase**: Stored as repository secret (`COSIGN_PASSWORD`)
+
+To regenerate signing keys:
+```bash
+cosign generate-key-pair
+# Update COSIGN_{PRIVATE,PUBLIC}_KEY & COSIGN_PASSWORD secrets
+# Update ./cosign.pub file content
+```
+
+#### Container Image Signatures
+
+All container images are signed with `cosign` and signatures are pushed to registries:
+- **Signature location**: OCI format under predictable names
+- **Discovery**: `cosign triangulate $IMAGE`
+- **Verification**: `cosign verify --key cosign.pub $IMAGE`
+
+#### Verification Instructions
+
+To verify release artifacts using the new SLSA provenance:
+
+**1. Install slsa-verifier:**
+```bash
+# Download from https://github.com/slsa-framework/slsa-verifier/releases
+wget https://github.com/slsa-framework/slsa-verifier/releases/latest/download/slsa-verifier-linux-amd64
+chmod +x slsa-verifier-linux-amd64
+```
+
+**2. Download artifacts:**
+```bash
+# Download the binary and provenance from GitHub release
+wget https://github.com/k8gb-io/k8gb/releases/download/v0.15.0/k8gb_0.15.0_linux_amd64.tar.gz
+wget https://github.com/k8gb-io/k8gb/releases/download/v0.15.0/multiple.intoto.jsonl
+```
+
+**3. Verify SLSA provenance:**
+```bash
+./slsa-verifier-linux-amd64 verify-artifact \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/k8gb-io/k8gb \
+  k8gb_0.15.0_linux_amd64.tar.gz
+```
+
+**4. Verify container images:**
+```bash
+TAG=v0.15.0
+IMG=ghcr.io/k8gb-io/k8gb:${TAG}
+
+# GHCR package may be private to org members, authenticate first
+GH_USER=$(gh api user --jq .login)
+GH_TOKEN=$(gh auth token)
+echo "${GH_TOKEN}" | docker login ghcr.io -u "${GH_USER}" --password-stdin
+cosign login ghcr.io -u "${GH_USER}" -p "${GH_TOKEN}"
+
+# verify key-based image signature on the image index digest
+INDEX_DIGEST=$(docker buildx imagetools inspect "${IMG}" | awk '/Digest:/ {print $2; exit}')
+
+# release pipeline currently signs container images with a legacy key-based
+# cosign flow (v1.12.1). Modern cosign enforces transparency log checks by
+# default, so use --insecure-ignore-tlog=true for compatibility verification.
+cosign verify --key cosign.pub --insecure-ignore-tlog=true "ghcr.io/k8gb-io/k8gb@${INDEX_DIGEST}"
+```
+
+**5. Verify container provenance:**
+```bash
+TAG=v0.15.0
+IMG=ghcr.io/k8gb-io/k8gb:${TAG}
+
+# keyless SLSA verification requires modern cosign (v2+; tested with v3.0.5)
+cosign version
+SLSA_ID_RE='^https://github.com/slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@refs/tags/v.*$'
+
+# verify provenance on platform manifests in the multi-arch image index
+for D in $(docker buildx imagetools inspect --raw "${IMG}" \
+  | jq -r '.manifests[] | select(.platform.architecture != "unknown") | .digest'); do
+  cosign verify-attestation \
+    --output=json \
+    --type slsaprovenance \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp "${SLSA_ID_RE}" \
+    "ghcr.io/k8gb-io/k8gb@${D}" \
+  | jq -r '.payload | @base64d | fromjson | .predicateType'
+done
+```
+
+The verification confirms that artifacts were:
+- Built by the official GitHub Actions workflow
+- From the expected source repository (github.com/k8gb-io/k8gb)
+- Without tampering during the build process
+
+### Helm Chart Verification
+
+All Helm charts published to the OCI registry are signed using keyless cosign signatures. End users can verify chart authenticity before installation.
+
+#### Prerequisites
+
+Install cosign:
+```bash
+# Install cosign (choose your platform)
+# Linux/macOS via Homebrew
+brew install cosign
+
+# Or download binary from GitHub releases
+wget https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+sudo mv cosign-linux-amd64 /usr/local/bin/cosign && chmod +x cosign-linux-amd64
+cosign version
+```
+
+#### Verifying Helm Charts
+
+**1. Verify chart signature before installation:**
+```bash
+# Verify specific release version (replace v0.16.0 with desired version)
+DIGEST=$(crane digest ghcr.io/k8gb-io/charts/k8gb:v0.16.0) && \
+cosign verify ghcr.io/k8gb-io/charts/k8gb@$DIGEST \
+  --certificate-identity "https://github.com/k8gb-io/k8gb/.github/workflows/helm_sign_oci.yaml@refs/heads/master" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+**2. Install verified chart:**
+```bash
+# After successful verification, install the chart
+helm install k8gb oci://ghcr.io/k8gb-io/charts/k8gb --version v0.16.0
+```
+
+**3. Verify using digest:**
+```bash
+# Get chart digest
+helm show chart oci://ghcr.io/k8gb-io/charts/k8gb:v0.16.0
+
+# Verify using digest for immutable reference
+cosign verify oci://ghcr.io/k8gb-io/charts/k8gb@sha256:abc123... \
+  --certificate-identity "https://github.com/k8gb-io/k8gb/.github/workflows/helm_sign_oci.yaml@refs/heads/master" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+#### Understanding the Verification
+
+The verification confirms that:
+- **Chart authenticity**: The chart was built and signed by the official k8gb GitHub Actions workflow
+- **Source integrity**: The chart originates from the official k8gb-io/k8gb repository
+- **Supply chain security**: No tampering occurred between build and distribution
+
+**Certificate Identity**: Matches the exact Github Actions workflow that signed the chart
+**OIDC Issuer**: Github token service that issued the signing certificate
+
+#### Troubleshooting Verification
+
+If verification fails:
+- **Check chart version exists**: `helm show chart oci://ghcr.io/k8gb-io/charts/k8gb:VERSION`
+- **Verify cosign version**: Ensure you're using cosign v2.0+ for keyless verification (recommended to have v3.0)
 
 ### Software bill of materials
 

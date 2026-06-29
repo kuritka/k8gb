@@ -1,7 +1,7 @@
 package istiovirtualservice
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ import (
 	"fmt"
 	"strings"
 
-	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
+	"github.com/k8gb-io/k8gb/controllers/refresolver/queryopts"
+
+	k8gbv1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
 	"github.com/k8gb-io/k8gb/controllers/logging"
 	"github.com/k8gb-io/k8gb/controllers/utils"
 	istio "istio.io/client-go/pkg/apis/networking/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,18 +38,13 @@ import (
 
 var log = logging.Logger()
 
-const (
-	// comma separated list of external IP addresses
-	externalIPsAnnotation = "k8gb.io/exposed-ip-addresses"
-)
-
 type ReferenceResolver struct {
 	virtualService *istio.VirtualService
 	lbService      *corev1.Service
 }
 
 // NewReferenceResolver creates a new reference resolver capable of understanding `networking.istio.io/v1` resources
-func NewReferenceResolver(gslb *k8gbv1beta1.Gslb, k8sClient client.Client) (*ReferenceResolver, error) {
+func NewReferenceResolver(gslb *k8gbv1beta1io.Gslb, k8sClient client.Client) (*ReferenceResolver, error) {
 	virtualServiceList, err := getGslbVirtualServiceRef(gslb, k8sClient)
 	if err != nil {
 		return nil, err
@@ -76,36 +72,58 @@ func NewReferenceResolver(gslb *k8gbv1beta1.Gslb, k8sClient client.Client) (*Ref
 }
 
 // getGslbVirtualServiceRef resolves an istio virtual service resource referenced by the Gslb spec
-func getGslbVirtualServiceRef(gslb *k8gbv1beta1.Gslb, k8sClient client.Client) ([]*istio.VirtualService, error) {
-	virtualServiceList := &istio.VirtualServiceList{}
-
-	selector, err := metav1.LabelSelectorAsSelector(&gslb.Spec.ResourceRef.LabelSelector)
+func getGslbVirtualServiceRef(gslb *k8gbv1beta1io.Gslb, k8sClient client.Client) ([]*istio.VirtualService, error) {
+	query, err := queryopts.Get(gslb.Spec.ResourceRef, gslb.Namespace)
 	if err != nil {
 		return nil, err
 	}
-	opts := &client.ListOptions{
-		LabelSelector: selector,
-	}
 
-	err = k8sClient.List(context.TODO(), virtualServiceList, opts)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info().
-				Str("gslb", gslb.Name).
-				Msg("Can't find referenced VirtualService resource")
+	switch query.Mode {
+	case queryopts.QueryModeGet:
+		var virtualService = &istio.VirtualService{}
+		err = k8sClient.Get(context.TODO(), *query.GetKey, virtualService)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				log.Info().
+					Str("gslb", gslb.Name).
+					Str("namespace", gslb.Namespace).
+					Msg("Can't find referenced VirtualService resource")
+			}
+			return nil, err
 		}
-		return nil, err
-	}
+		return []*istio.VirtualService{virtualService}, nil
 
-	return virtualServiceList.Items, err
+	case queryopts.QueryModeList:
+		virtualServiceList := &istio.VirtualServiceList{}
+		err = k8sClient.List(context.TODO(), virtualServiceList, query.ListOpts...)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				log.Info().
+					Str("gslb", gslb.Name).
+					Str("namespace", gslb.Namespace).
+					Msg("Can't find referenced VirtualService resource")
+			}
+			return nil, err
+		}
+		return virtualServiceList.Items, nil
+	}
+	return nil, fmt.Errorf("unknown query mode %v", query.Mode)
 }
 
 // getGateway retrieves the istio gateway referenced by the istio virtual service
 func getGateway(virtualService *istio.VirtualService, k8sClient client.Client) (*istio.Gateway, error) {
-	if len(virtualService.Spec.Gateways) != 1 {
-		return nil, fmt.Errorf("expected exactly 1 Gateway to be referenced by the VirtualService but %d were found", len(virtualService.Spec.Gateways))
+	var ingressGateways []string
+	for _, gateway := range virtualService.Spec.Gateways {
+		// count only dedicated ingress gateways
+		if gateway != "mesh" {
+			ingressGateways = append(ingressGateways, gateway)
+		}
 	}
-	gatewayRef := strings.Split(virtualService.Spec.Gateways[0], "/")
+
+	if len(ingressGateways) != 1 {
+		return nil, fmt.Errorf("expected exactly 1 Gateway to be referenced by the VirtualService but %d were found", len(ingressGateways))
+	}
+	gatewayRef := strings.Split(ingressGateways[0], "/")
 	gatewayNamespace := gatewayRef[0]
 	gatewayName := gatewayRef[1]
 
@@ -117,8 +135,8 @@ func getGateway(virtualService *istio.VirtualService, k8sClient client.Client) (
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Info().
-				Str("gatewayNamespace", gatewayNamespace).
-				Str("gatewayName", gatewayName).
+				Str("gateway", gatewayName).
+				Str("namespace", gatewayNamespace).
 				Msg("Can't find Gateway resource referenced by VirtualService")
 		}
 		return nil, err
@@ -153,21 +171,21 @@ func getLbService(gateway *istio.Gateway, k8sClient client.Client) (*corev1.Serv
 }
 
 // GetServers retrieves the GSLB server configuration from the istio virtual service resource
-func (rr *ReferenceResolver) GetServers() ([]*k8gbv1beta1.Server, error) {
-	hosts := rr.virtualService.Spec.Hosts
-	if len(hosts) < 1 {
+func (rr *ReferenceResolver) GetServers() ([]*k8gbv1beta1io.Server, error) {
+	hostnames := rr.virtualService.Spec.Hosts
+	if len(hostnames) < 1 {
 		return nil, fmt.Errorf("can't find hosts in VirtualService %s", rr.virtualService.Name)
 	}
 
-	servers := []*k8gbv1beta1.Server{}
-	for _, host := range hosts {
-		server := &k8gbv1beta1.Server{
-			Host:     host,
-			Services: []*k8gbv1beta1.NamespacedName{},
+	servers := []*k8gbv1beta1io.Server{}
+	for _, hostname := range hostnames {
+		server := &k8gbv1beta1io.Server{
+			Host:     hostname,
+			Services: []*k8gbv1beta1io.NamespacedName{},
 		}
 		for _, http := range rr.virtualService.Spec.Http {
 			for _, route := range http.Route {
-				server.Services = append(server.Services, &k8gbv1beta1.NamespacedName{
+				server.Services = append(server.Services, &k8gbv1beta1io.NamespacedName{
 					Name:      route.Destination.Host,
 					Namespace: rr.virtualService.Namespace,
 				})
@@ -175,7 +193,7 @@ func (rr *ReferenceResolver) GetServers() ([]*k8gbv1beta1.Server, error) {
 		}
 		for _, tls := range rr.virtualService.Spec.Tls {
 			for _, route := range tls.Route {
-				server.Services = append(server.Services, &k8gbv1beta1.NamespacedName{
+				server.Services = append(server.Services, &k8gbv1beta1io.NamespacedName{
 					Name:      route.Destination.Host,
 					Namespace: rr.virtualService.Namespace,
 				})
@@ -183,7 +201,7 @@ func (rr *ReferenceResolver) GetServers() ([]*k8gbv1beta1.Server, error) {
 		}
 		for _, tcp := range rr.virtualService.Spec.Tcp {
 			for _, route := range tcp.Route {
-				server.Services = append(server.Services, &k8gbv1beta1.NamespacedName{
+				server.Services = append(server.Services, &k8gbv1beta1io.NamespacedName{
 					Name:      route.Destination.Host,
 					Namespace: rr.virtualService.Namespace,
 				})
@@ -196,9 +214,14 @@ func (rr *ReferenceResolver) GetServers() ([]*k8gbv1beta1.Server, error) {
 }
 
 // GetGslbExposedIPs retrieves the load balancer IP address of the GSLB
-func (rr *ReferenceResolver) GetGslbExposedIPs(gslbAnnotations map[string]string, edgeDNSServers utils.DNSList) ([]string, error) {
+func (rr *ReferenceResolver) GetGslbExposedIPs(gslbAnnotations map[string]string, parentZoneDNSServers utils.DNSList) ([]string, error) {
+	// fetch the IP addresses by resolving hostnames from an annotation if it exists
+	if hostnames, ok := gslbAnnotations[utils.ExposedHostnamesAnnotation]; ok {
+		return utils.ResolveHostnames(hostnames, parentZoneDNSServers...)
+	}
+
 	// fetch the IP addresses of the reverse proxy from an annotation if it exists
-	if ingressIPsFromAnnotation, ok := gslbAnnotations[externalIPsAnnotation]; ok {
+	if ingressIPsFromAnnotation, ok := gslbAnnotations[utils.ExternalIPsAnnotation]; ok {
 		return utils.ParseIPAddresses(ingressIPsFromAnnotation)
 	}
 
@@ -209,9 +232,9 @@ func (rr *ReferenceResolver) GetGslbExposedIPs(gslbAnnotations map[string]string
 			gslbIngressIPs = append(gslbIngressIPs, ip.IP)
 		}
 		if len(ip.Hostname) > 0 {
-			IPs, err := utils.Dig(ip.Hostname, 8, edgeDNSServers...)
+			IPs, err := utils.Dig(ip.Hostname, 8, parentZoneDNSServers...)
 			if err != nil {
-				log.Warn().Err(err).Msg("Dig error")
+				log.Warn().Err(err).Msg("Dig error resolving Istio VirtualService's hostname")
 				return nil, err
 			}
 			gslbIngressIPs = append(gslbIngressIPs, IPs...)

@@ -8,8 +8,8 @@ Cloudflare for automated zone delegation configuration.
 As a prerequisite, we will need two Kubernetes clusters where you want to deploy
 k8gb and enable global load balancing between them.
 
-You can reuse local clusters from the [Infoblox tutorial](../docs/deploy_infoblox.html),
-the EKS-based setup from [Route53 tutorial](../docs/deploy_route53.md)
+You can reuse local clusters from the [Infoblox tutorial](deploy_infoblox.md),
+the EKS-based setup from [Route53 tutorial](deploy_route53.md)
 or any Kubernetes deployment method that is convenient to you.
 
 The specific Kubernetes deployment method is not essential for the focus of this documentation guide.
@@ -30,29 +30,28 @@ Remember to change the zone-related values to point configuration to your own DN
 
 ```yaml
 k8gb:
-  dnsZone: "cloudflare-test.k8gb.io"
-  # -- main zone which would contain gslb zone to delegate
-  edgeDNSZone: "k8gb.io" # main zone which would contain gslb zone to delegate
+  dnsZones:
+  - parentZone: "k8gb.io"
+    loadBalancedZone: "cloudflare-test.k8gb.io"
 ```
 
 ### Cloudflare-specific configuration
 
-Let's look closer at the Cloudflare section of the configuration examples.
-
+The example linked above shows how to configure a `zone-id-filter` and the number of `cloudflare-dns-records-per-page`.
 ```yaml
-cloudflare:
-  # -- Enable Cloudflare provider
-  enabled: true
-  # -- Cloudflare Zone ID
-  zoneID: cdebf92e613133e4bb176a14a9c5b730
-  # -- Configure how many DNS records to fetch per request
-  # see https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/cloudflare.md#throttling
-  dnsRecordsPerPage: 5000
+extdns:
+  ...
+  extraArgs
+    # -- Cloudflare Zone ID
+    zone-id-filter: "cdebf92e613133e4bb176a14a9c5b730"
+    # -- Configure how many DNS records to fetch per request
+    # see https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/cloudflare.md#throttling
+    cloudflare-dns-records-per-page: "5000"
 ```
 
-Follow
-https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/
-to find your `zoneID`
+For additional configuration options please refer to [External DNS's documentation](https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/cloudflare/)
+
+To find your `zoneID` follow: https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/
 
 ### Install the k8gb helm chart in each cluster
 
@@ -79,7 +78,7 @@ Note: you can create Cloudflare API tokens at https://dash.cloudflare.com/profil
 Now we can test the setup with a pretty standard Gslb resource configuration.
 
 ```yaml
-apiVersion: k8gb.absa.oss/v1beta1
+apiVersion: k8gb.io/v1beta1
 kind: Gslb
 metadata:
   name: test-gslb-failover
@@ -88,12 +87,10 @@ spec:
   resourceRef:
     apiVersion: networking.k8s.io/v1
     kind: Ingress
-    matchLabels:
-      app: test-gslb-failover
+    name: test-gslb-failover
   strategy:
     dnsTtlSeconds: 60 # Minimum for non-Enterprise Cloudflare https://developers.cloudflare.com/dns/manage-dns-records/reference/ttl/
     primaryGeoTag: eu
-    splitBrainThresholdSeconds: 300
     type: failover
 ```
 
@@ -117,8 +114,8 @@ $ kubectl -n k8gb get dnsendpoints.externaldns.k8s.io k8gb-ns-extdns -o yaml
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
-  annotations:
-    k8gb.absa.oss/dnstype: extdns
+  labels:
+    k8gb.io/dnstype: extdns
   creationTimestamp: "2023-11-12T19:55:20Z"
   generation: 3
   name: k8gb-ns-extdns
@@ -144,7 +141,7 @@ spec:
 On the Cloudflare dashboard side, you should observe that NS and glue A records are
 automatically created:
 
-![Cloudflare dashboard with Zone Delegation records](/docs/images/k8gb-cloudflare.png)
+![Cloudflare dashboard with Zone Delegation records](images/k8gb-cloudflare.png)
 
 ## Troubleshooting
 

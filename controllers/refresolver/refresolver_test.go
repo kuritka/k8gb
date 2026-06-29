@@ -1,7 +1,7 @@
 package refresolver
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"testing"
 
-	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
+	k8gbv1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
 	utils "github.com/k8gb-io/k8gb/controllers/utils"
 	"github.com/stretchr/testify/assert"
 	istio "istio.io/client-go/pkg/apis/networking/v1"
@@ -30,6 +30,9 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
+	gatewayapiv1alpha3 "sigs.k8s.io/gateway-api/apis/v1alpha3"
 )
 
 // TestNew tests if the RefResolver is instantiated with the correct type
@@ -65,6 +68,48 @@ func TestNew(t *testing.T) {
 			expectedReferenceResolverType: "*ingress.ReferenceResolver",
 			expectedError:                 nil,
 		},
+		{
+			name:                          "referenced gateway API HTTPRoute",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_httproute.yaml",
+			expectedReferenceResolverType: "*gatewayapihttproute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API GRPCRoute",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_grpcroute.yaml",
+			expectedReferenceResolverType: "*gatewayapigrpcroute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API TCPRoute",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_tcproute.yaml",
+			expectedReferenceResolverType: "*gatewayapitcproute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API UDPRoute",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_udproute.yaml",
+			expectedReferenceResolverType: "*gatewayapiudproute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API TLSRoute",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_tlsroute.yaml",
+			expectedReferenceResolverType: "*gatewayapitlsroute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API TLSRoute v1",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_tlsroute_v1.yaml",
+			expectedReferenceResolverType: "*gatewayapitlsroute.ReferenceResolver",
+			expectedError:                 nil,
+		},
+		{
+			name:                          "referenced gateway API TLSRoute v1alpha2",
+			gslbYaml:                      "./testdata/gslb_gatewayapi_tlsroute_v1alpha2.yaml",
+			expectedReferenceResolverType: "*gatewayapitlsroute.ReferenceResolver",
+			expectedError:                 nil,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -84,7 +129,7 @@ func TestNew(t *testing.T) {
 }
 
 // getTextContext creates a kubernetes client with access to all objects that need to be looked up
-func getTestContext(gslbFile string) (client.Client, *k8gbv1beta1.Gslb) {
+func getTestContext(gslbFile string) (client.Client, *k8gbv1beta1io.Gslb) {
 	gslb := utils.FileToGSLB(gslbFile)
 	objs := []runtime.Object{
 		gslb,
@@ -92,13 +137,29 @@ func getTestContext(gslbFile string) (client.Client, *k8gbv1beta1.Gslb) {
 		utils.FileToIngress("./testdata/ingress_embedded.yaml"),
 		utils.FileToIstioVirtualService("./testdata/istio_virtualservice.yaml"),
 		utils.FileToIstioGateway("./testdata/istio_gateway.yaml"),
+		utils.FileToGatewayApiGateway("./testdata/gatewayapi_gateway.yaml"),
+		utils.FileToGatewayApiHttpRoute("./testdata/gatewayapi_httproute.yaml"),
+		utils.FileToGatewayApiGrpcRoute("./testdata/gatewayapi_grpcroute.yaml"),
+		utils.FileToGatewayApiTlsRoute("./testdata/gatewayapi_tlsroute.yaml"),
+		utils.FileToGatewayApiTlsRouteV1("./testdata/gatewayapi_tlsroute_v1.yaml"),
+		utils.FileToGatewayApiTlsRouteV1Alpha2("./testdata/gatewayapi_tlsroute_v1alpha2.yaml"),
+		utils.FileToGatewayApiTcpRoute("./testdata/gatewayapi_tcproute.yaml"),
+		utils.FileToGatewayApiUdpRoute("./testdata/gatewayapi_udproute.yaml"),
 		utils.FileToService("./testdata/istio_service.yaml"),
 	}
 	// Register operator types with the runtime scheme.
 	s := scheme.Scheme
-	s.AddKnownTypes(k8gbv1beta1.GroupVersion, &k8gbv1beta1.Gslb{}, &k8gbv1beta1.GslbList{})
+	s.AddKnownTypes(k8gbv1beta1io.GroupVersion, &k8gbv1beta1io.Gslb{}, &k8gbv1beta1io.GslbList{})
 	s.AddKnownTypes(istio.SchemeGroupVersion, &istio.VirtualService{}, &istio.VirtualServiceList{})
 	s.AddKnownTypes(istio.SchemeGroupVersion, &istio.Gateway{}, &istio.GatewayList{})
+	s.AddKnownTypes(gatewayapiv1.SchemeGroupVersion, &gatewayapiv1.HTTPRoute{}, &gatewayapiv1.HTTPRouteList{})
+	s.AddKnownTypes(gatewayapiv1.SchemeGroupVersion, &gatewayapiv1.GRPCRoute{}, &gatewayapiv1.GRPCRouteList{})
+	s.AddKnownTypes(gatewayapiv1.SchemeGroupVersion, &gatewayapiv1.Gateway{}, &gatewayapiv1.GatewayList{})
+	s.AddKnownTypes(gatewayapiv1.SchemeGroupVersion, &gatewayapiv1.TLSRoute{}, &gatewayapiv1.TLSRouteList{})
+	s.AddKnownTypes(gatewayapiv1alpha2.SchemeGroupVersion, &gatewayapiv1alpha2.TCPRoute{}, &gatewayapiv1alpha2.TCPRouteList{})
+	s.AddKnownTypes(gatewayapiv1alpha2.SchemeGroupVersion, &gatewayapiv1alpha2.UDPRoute{}, &gatewayapiv1alpha2.UDPRouteList{})
+	s.AddKnownTypes(gatewayapiv1alpha2.SchemeGroupVersion, &gatewayapiv1alpha2.TLSRoute{}, &gatewayapiv1alpha2.TLSRouteList{})
+	s.AddKnownTypes(gatewayapiv1alpha3.SchemeGroupVersion, &gatewayapiv1alpha3.TLSRoute{}, &gatewayapiv1alpha3.TLSRouteList{})
 	cl := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(objs...).Build()
 
 	return cl, gslb

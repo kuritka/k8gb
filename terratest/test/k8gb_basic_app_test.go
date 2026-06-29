@@ -4,7 +4,7 @@
 package test
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -80,7 +80,7 @@ func TestK8gbBasicAppExample(t *testing.T) {
 
 	utils.AssertGslbStatus(t, options, "test-gslb", "terratest-notfound."+settings.DNSZone+":NotFound terratest-roundrobin."+settings.DNSZone+":Healthy terratest-unhealthy."+settings.DNSZone+":Unhealthy")
 	// Ensure controller labels DNSEndpoint objects
-	utils.AssertDNSEndpointLabel(t, options, "k8gb.absa.oss/dnstype")
+	utils.AssertDNSEndpointLabel(t, options, "k8gb.io/dnstype")
 
 	t.Run("Broken object rejected by API", func(t *testing.T) {
 		err := k8s.KubectlApplyE(t, options, brokenResourcePath)

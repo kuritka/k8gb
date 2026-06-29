@@ -6,43 +6,45 @@ global:
 
 k8gb:
   # -- image repository
-  imageRepo: "docker.io/absaoss/k8gb"
+  imageRepo: registry.k8gb.io/k8gb-io/k8gb
   # -- ( string ) image tag defaults to Chart.AppVersion, see Chart.yaml, but can be overrided with imageTag key
   imageTag:
   # -- whether it should also deploy the gslb and dnsendpoints CRDs
   deployCrds: true
+  # -- whether it should also deploy the legacy k8gb.absa.oss CRD
+  installLegacyCrds: true
   # -- whether it should also deploy the service account, cluster role and cluster role binding
   deployRbac: true
-  # -- dnsZone controlled by gslb
-  dnsZone: "cloud.example.com"
-  # -- Negative TTL for SOA record
-  dnsZoneNegTTL: 300
-  # -- main zone which would contain gslb zone to delegate
-  edgeDNSZone: "example.com" # main zone which would contain gslb zone to delegate
-  # -- host/ip[:port] format is supported here where port defaults to 53
+  # DNSZones - For backward compatibility, the dnsZone and edgeDNSZone fields are allowed; otherwise,
+  # the dnsZones array is used. For valid values, use either dnsZone and edgeDNSZone or dnsZones.
+  #
+  # -- array of dns zones controlled by gslb
+  dnsZones:
+    - parentZone: "example.com" # -- parent zone which would contain gslb zone to delegate (same meaning as the old edgeDNSZone)
+      loadBalancedZone: "cloud.example.com" # -- zone controlled by gslb (same meaning as the old dnsZone)
+      dnsZoneNegTTL: 30  # -- Negative TTL for SOA record# -- host/ip[:port] format is supported here where port defaults to 53
+      extraPlugins: [] # -- Extra CoreDNS plugins to be enabled for this zone
+      extraServerBlocks: "" # -- Extra CoreDNS server blocks for this zone
+      geoDataFilePath: "" # -- GeoData file path
+      geoDataField: "" # -- GeoData field
   edgeDNSServers:
     # -- use this DNS server as a main resolver to enable cross k8gb DNS based communication
     - "1.1.1.1"
-  # -- used for places where we need to distinguish between different Gslb instances
+  # -- Unique geotag for this K8GB instance. This tag identifies the cluster's location or role (e.g., "eu", "us-east", "dc1" or "primary"). This tag should be present in all clusters’ extGslbClustersGeoTags
   clusterGeoTag: "eu"
-  # -- comma-separated list of external gslb geo tags to pair with
-  extGslbClustersGeoTags: "us"
+  # -- Comma-separated list of geotags for external K8GB clusters. These are arbitrary, user-defined identifiers (e.g., "eu,us" or "dc2,dc3") used for coordination between K8GB instances
+  # If the value remains empty, dynamic geotags extracted from the NS records on the edge DNS will be used.
+  extGslbClustersGeoTags: "eu,us"
   # -- Reconcile time in seconds
   reconcileRequeueSeconds: 30
   # -- TTL of the NS and respective glue record used by external DNS
   nsRecordTTL: 30
-  coredns:
-    # -- Extra CoreDNS server blocks
-    extraServerBlocks: ""
-    # -- Extra CoreDNS plugins to be enabled
-    extra_plugins: []
+
   log:
     # -- log format (simple,json)
     format: simple # log format (simple,json)
     # -- log level (panic,fatal,error,warn,info,debug,trace)
     level: info # log level (panic,fatal,error,warn,info,debug,trace)
-  # -- Enable SplitBrain check (Infoblox only)
-  splitBrainCheck: false
   # -- Metrics server address
   metricsAddress: "0.0.0.0:8080"
   securityContext:
@@ -64,29 +66,23 @@ k8gb:
   # -- pod labels
   podLabels: {}
 
-externaldns:
-  # -- `.spec.template.spec.dnsPolicy` for ExternalDNS deployment
-  dnsPolicy: "ClusterFirst"
-  # -- extra environment variables
-  extraEnv: []
-  # -- extra volumes
-  extraVolumes: []
-  # -- extra volume mounts
-  extraVolumeMounts: []
-  # -- external-dns image repo:tag
-  # It is important to use the image from k8gb external-dns fork to get the full
-  # functionality. See links below
-  # https://github.com/k8gb-io/external-dns
-  # https://github.com/k8gb-io/external-dns/pkgs/container/external-dns
-  image: ghcr.io/k8gb-io/external-dns:v0.13.4-azure-ns-multiarch
-  # -- external-dns sync interval
-  interval: "20s"
-  securityContext:
-    # -- For more options consult https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#securitycontext-v1-core
-    runAsUser: 1000
-    # -- For ExternalDNS to be able to read Kubernetes and AWS token files
-    fsGroup: 65534 # For ExternalDNS to be able to read Kubernetes and AWS token files
-    runAsNonRoot: true
+  resources:
+    # -- requests and limits for the k8gb operator container
+    requests:
+      memory: "32Mi"
+      cpu: "100m"
+    limits:
+      memory: "128Mi"
+      cpu: "500m"
+
+  # -- Tolerations to apply to the k8gb operator deployment
+  # for example:
+  #   tolerations:
+  #   - key: foo.bar.com/role
+  #     operator: Equal
+  #     value: master
+  #     effect: NoSchedule
+  tolerations: []
 
 coredns:
   # -- service: refer to https://www.k8gb.io/docs/service_upgrade.html for upgrading CoreDNS service steps
@@ -96,9 +92,9 @@ coredns:
     skipConfig: true
   image:
     # -- CoreDNS CRD plugin image
-    repository: absaoss/k8s_crd
+    repository: registry.k8gb.io/k8gb-io/k8s_crd
     # -- image tag
-    tag: v0.1.1
+    tag: v0.4.0
   # -- Creates serviceAccount for coredns
   serviceAccount:
     create: true
@@ -109,11 +105,47 @@ coredns:
       add: []
   # -- Only meant to open the correct service and container ports, has no other impact on the coredns configuration
   servers:
-  - port: 5353
+  - zones:
+    - zone: .
+      use_tcp: true
+    port: 5353
     servicePort: 53
     plugins:
     - name: prometheus
       parameters: 0.0.0.0:9153
+
+  # -- If the value is LoadBalancer, the IP addresses of the cluster will be loaded from the CoreDNS service;
+  # otherwise, they will be loaded from the first ingress marked with the label "k8gb.io/ip-source=true".
+  serviceType: "ClusterIP"
+
+  resources:
+    # -- requests and limits for the coredns container
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # -- CoreDNS configmap
+  corefile:
+    enabled: true
+    # -- Reload CoreDNS configmap when it changes
+    # https://coredns.io/plugins/reload/
+    reload:
+      enabled: true
+      interval: 30s
+      jitter: 15s
+
+  # -- dynamic zones configmap
+  extraVolumeMounts:
+    - name: dynamic-zones
+      mountPath: /etc/dynamic
+  extraVolumes:
+    - name: dynamic-zones
+      configMap:
+        name: k8gb-zone-delegation
+        optional: true
 
 infoblox:
   # -- infoblox provider enabled
@@ -130,85 +162,27 @@ infoblox:
   httpRequestTimeout: 20
   # -- Size of connections pool
   httpPoolConnections: 10
+  # -- DNS view to use for zone operations
+  dnsView: "default"
 
-route53:
-  # -- Enable Route53 provider
+extdns:
   enabled: false
-  # -- Route53 ZoneID
-  hostedZoneID: ZXXXSSS
-  # -- specify IRSA Role in AWS ARN format or disable it by setting to `null`
-  irsaRole: arn:aws:iam::111111:role/external-dns
-  # -- specify IRSA Role in AWS ARN format for assume role permissions or disable it by setting to `null`
-  assumeRoleArn: null
-  # -- alternatively specify the secret name with static credentials for IAM user (make sure this user has limited privileges)
-  # this can be useful when IRSA is not present or when using say Azure cluster and Route53
-  # docs: https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md#create-iam-user-and-attach-the-policy
-  secret: null
-
-ns1:
-  # -- Enable NS1 provider
-  enabled: false
-  # -- optional custom NS1 API endpoint for on-prem setups
-  # endpoint: https://api.nsone.net/v1/
-  ignoreSSL: false
-
-rfc2136:
-  enabled: false
-  rfc2136Opts:
-    - host: host.k3d.internal
-    - port: 1053
-  rfc2136auth:
-    insecure:
-      enabled: false
-    tsig:
-      enabled: true
-      tsigCreds:
-        - tsig-secret-alg: hmac-sha256
-        - tsig-keyname: externaldns-key
-    gssTsig:
-      enabled: false
-      kerberosConfigMap: kerberos-config
-      gssTsigCreds:
-        - kerberos-username: ad-user
-        - kerberos-password: ad-user-pass
-        - kerberos-realm: ad-domain-realm
-
-azuredns:
-  enabled: false
-  # -- External-dns secret name which contains Azure credentials.
-  # See https://github.com/k8gb-io/external-dns/blob/master/docs/tutorials/azure.md#configuration-file for expected format
-  authSecretName: external-dns-secret-azure
-  createAuthSecret:
-    # -- Create an authentication secret for Azure DNS based on the values below
-    # alternatively, you can create the secret manually and pass its name in the `azuredns.authSecretName` value
-    enabled: true
-    # -- Azure tenant ID which holds the managed identity
-    tenantId: myTenantId
-    # -- subscription id which holds the Azure DNS zone
-    subscriptionId: mySubscriptionId
-    # -- Azure Resource Group which holds the Azure DNS Zone (which is defined as 'k8gb.edgeDNSZone')
-    resourceGroup: myDnsResourceGroup
-    # -- Azure client ID that is associated with the Service Principal.
-    aadClientId: myAadClientId
-    # -- Azure client secret that is associated with the Service Principal.
-    aadClientSecret: myAadClientSecret
-    # -- Use either AKS Kubelet Identity or AAD Pod Identities
-    useManagedIdentityExtension: false
-    # -- Client id from the Managed identitty when using the AAD Pod Identities
-    userAssignedIdentityID: myUserAssignedIdentityID
-    # -- Use AKS workload identity extension
-    useWorkloadIdentityExtension: false
-
-cloudflare:
-  # -- Enable Cloudflare provider
-  enabled: false
-  # -- Cloudflare Zone ID
-  # follow https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/
-  # to find your zoneID value
-  zoneID: replaceme
-  # -- Configure how many DNS records to fetch per request
-  # see https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/cloudflare.md#throttling
-  dnsRecordsPerPage: 5000
+  interval: 20s
+  labelFilter: "k8gb.io/dnstype=extdns"
+  logLevel: debug
+  managedRecordTypes:
+  - A
+  - CNAME
+  - NS
+  policy: sync
+  rbac:
+    create: true
+  sources:
+  - crd
+  domainFilters:
+  - "example.com"
+  txtPrefix: "k8gb-<GEOTAG>-"
+  txtOwnerId: "k8gb-<GEOTAG>"
 
 openshift:
   # -- Install OpenShift specific RBAC
@@ -237,15 +211,19 @@ tracing:
     # -- OpenTelemetry collector into which the k8gb operator sends the spans. It can be further configured to send its data
     # to somewhere else using exporters (Jaeger for instance)
     repository: otel/opentelemetry-collector
-    tag: 0.116.1
+    tag: 0.155.0
     pullPolicy: Always
 
   jaegerImage:
     # -- if `tracing.deployJaeger==true` this image will be used in the deployment for Jaeger
     repository: jaegertracing/all-in-one
-    tag: 1.64.0
+    tag: 1.76.0
     pullPolicy: Always
 
 istio:
   # -- install istio RBAC
+  enabled: true
+
+gatewayapi:
+  # -- install gatewayapi RBAC
   enabled: true

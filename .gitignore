@@ -15,6 +15,9 @@ tags
 # Helm charts
 chart/k8gb/charts/*.tgz
 
+# Generated test configuration files
+dns-provider-test/gcp/values-generated.yaml
+
 # OLM
 /olm/bundle
 /olm/olm-bundle
@@ -32,3 +35,39 @@ changes
 cosign.key
 *.sig
 *.att
+
+# Terraform / OpenTofu
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+terraform.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tofu.tfstate
+tofu.tfstate.*
+.tofu/
+.tofu.lock.hcl
+
+# custom org tooling
+# TODO: replace Makefile by taskfile
+taskfile.yaml
+
+# chainsaw local test run
+chainsaw/kubeconfig/
+
+mkdocs-env/
+site/
+docs/__pycache__/
+
+# Trivy security scan results
+trivy-*.sarif
+trivy-*.json
+trivy-*.html
+.trivy/
+# worktrees
+.worktrees/

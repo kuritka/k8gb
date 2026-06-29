@@ -1,7 +1,7 @@
 package utils
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import (
 
 var a2 = map[string]string{"k8gb.io/primary-geotag": "eu", "k8gb.io/strategy": "failover"}
 var a1 = map[string]string{"field.cattle.io/publicEndpoints": "dummy"}
-var annotations = []string{"k8gb.io/primary-geotag", "k8gb.io/strategy", "k8gb.io/dns-ttl-seconds", "k8gb.io/splitbrain-threshold-seconds"}
+var annotations = []string{"k8gb.io/primary-geotag", "k8gb.io/strategy", "k8gb.io/dns-ttl-seconds"}
 
 func TestAddNewAnnotations(t *testing.T) {
 	// arrange

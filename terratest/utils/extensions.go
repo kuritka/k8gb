@@ -1,7 +1,7 @@
 package utils
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -272,8 +272,11 @@ func (w *Workflow) Start() (*Instance, error) {
 		istioInjection = "enabled"
 	}
 	k8s.CreateNamespaceWithMetadata(w.t, w.k8sOptions, metav1.ObjectMeta{
-		Name:   w.namespace,
-		Labels: map[string]string{"istio-injection": istioInjection},
+		Name: w.namespace,
+		Labels: map[string]string{
+			"istio-injection":   istioInjection,
+			"k8gb.io/terratest": "true",
+		},
 	})
 	w.state.namespaceCreated = true
 
@@ -453,18 +456,18 @@ func (i *Instance) WaitForLocalDNSEndpointExists() error {
 	return tickerWaiter(DefaultRetries, "LocalDNSEndpoint exists:", periodic)
 }
 
-func (i *Instance) WaitForExternalDNSEndpointExists() error {
+func (i *Instance) WaitForExternalDNSEndpointExists(zone string) error {
 	periodic := func() (result bool, err error) {
-		lep := i.Resources().GetK8gbExternalDNSEndpoint()
+		lep := i.Resources().GetK8gbExternalDNSEndpoint(zone)
 		result = len(lep.Spec.Endpoints) > 0
 		return result, err
 	}
 	return tickerWaiter(DefaultRetries, "ExternalDNSEndpoint exists:", periodic)
 }
 
-func (r *Resources) WaitForExternalDNSEndpointHasTargets(epName string) error {
+func (r *Resources) WaitForExternalDNSEndpointHasTargets(zone, epName string) error {
 	periodic := func() (result bool, err error) {
-		epx, err := r.GetK8gbExternalDNSEndpoint().GetEndpointByName(epName)
+		epx, err := r.GetK8gbExternalDNSEndpoint(zone).GetEndpointByName(epName)
 		if err != nil {
 			return false, nil
 		}
@@ -536,13 +539,21 @@ func (i *Instance) waitForApp(predicate func(instances int) bool, stop bool) (er
 	}
 	i.w.t.Logf("Wait for ExternalDNSEndpoint %s.%s to be filled by targets %s", i.w.state.gslb.name, i.w.namespace, i.w.state.gslb.host)
 	// second conditions
+	endpointReady := false
 	for n := 0; n < maxRetries/2; n++ {
 		ep, err := i.Resources().GetExternalDNSEndpointByName(i.w.state.gslb.name, i.w.namespace).GetEndpointByName(fmt.Sprintf("localtargets-%s", i.w.state.gslb.host))
 		if err != nil {
-			// app is already stopped and cant be found
-			if stop && err.Error() == notFoundError {
-				i.w.t.Logf("App is stopped %s", i.w.state.testApp.name)
-				break
+			if err.Error() == notFoundError {
+				// During startup the local DNSEndpoint can lag behind the app becoming ready,
+				// especially for Istio-backed scenarios. Retry instead of failing immediately.
+				if stop {
+					i.w.t.Logf("App is stopped %s", i.w.state.testApp.name)
+					endpointReady = true
+					break
+				}
+				i.w.t.Logf("Waiting for local DNSEndpoint for %s to be created. Waiting for %d seconds...", i.w.state.testApp.name, waitSeconds)
+				time.Sleep(waitSeconds * time.Second)
+				continue
 			}
 			i.w.t.Logf("Error waiting for the app %s. %s", i.w.state.testApp.name, err)
 			require.NoError(i.w.t, err)
@@ -558,6 +569,14 @@ func (i *Instance) waitForApp(predicate func(instances int) bool, stop bool) (er
 			i.w.t.Logf("Waiting for %s to be stopped. Waiting for %d seconds...", i.w.state.testApp.name, waitSeconds)
 			time.Sleep(waitSeconds * time.Second)
 			continue
+		}
+		endpointReady = true
+		break
+	}
+	if !endpointReady {
+		return retry.MaxRetriesExceeded{
+			Description: "Unable to " + op + " Podinfo app local DNSEndpoint",
+			MaxRetries:  maxRetries / 2,
 		}
 	}
 	i.w.t.Logf("Wait for coreDNS to be filled by local targets %s", i.w.state.gslb.host)
@@ -647,7 +666,7 @@ func (i *Instance) GetStatus(annotation string) (s *InstanceStatus) {
 	if err != nil {
 		s.AppReplicas = na
 	}
-	s.GslbHealthStatus, err = k8s.RunKubectlAndGetOutputE(i.w.t, i.w.k8sOptions, "get", "gslb", i.w.state.gslb.name, "-o",
+	s.GslbHealthStatus, err = k8s.RunKubectlAndGetOutputE(i.w.t, i.w.k8sOptions, "get", canonicalGslbResource, i.w.state.gslb.name, "-o",
 		"custom-columns=SERVICESTATUS:.status.serviceHealth", "--no-headers")
 	if err != nil {
 		s.GslbHealthStatus = na
@@ -729,7 +748,7 @@ type Resources struct {
 
 // GslbSpecProperty returns actual value of one Spec property, e.g: `spec.ingress.rules[0].host`
 func (g *Gslb) GslbSpecProperty(specPath string) string {
-	actualValue, _ := k8s.RunKubectlAndGetOutputE(g.i.w.t, g.i.w.k8sOptions, "get", "gslb", g.i.w.state.gslb.name,
+	actualValue, _ := k8s.RunKubectlAndGetOutputE(g.i.w.t, g.i.w.k8sOptions, "get", canonicalGslbResource, g.i.w.state.gslb.name,
 		"-o", fmt.Sprintf("custom-columns=SERVICESTATUS:%s", specPath), "--no-headers")
 	return actualValue
 }
@@ -740,8 +759,9 @@ func (r *Resources) GetLocalDNSEndpoint() DNSEndpoint {
 	return ep
 }
 
-func (r *Resources) GetK8gbExternalDNSEndpoint() DNSEndpoint {
-	return r.GetExternalDNSEndpointByName("k8gb-ns-extdns", "k8gb")
+func (r *Resources) GetK8gbExternalDNSEndpoint(zone string) DNSEndpoint {
+	var suffix = strings.Trim(strings.ReplaceAll(zone, ".", "-"), " ")
+	return r.GetExternalDNSEndpointByName("k8gb-ns-extdns-"+suffix, "k8gb")
 }
 
 func (r *Resources) GetExternalDNSEndpointByName(name, namespace string) DNSEndpoint {
@@ -797,7 +817,7 @@ func (g *Gslb) GetAnnotations() (a map[string]string) {
 			Annotations map[string]string `yaml:"annotations"`
 		} `yaml:"metadata"`
 	}{}
-	strValue, err := k8s.RunKubectlAndGetOutputE(g.i.w.t, g.i.w.k8sOptions, "get", "gslb", g.i.w.state.gslb.name, "-ojson")
+	strValue, err := k8s.RunKubectlAndGetOutputE(g.i.w.t, g.i.w.k8sOptions, "get", canonicalGslbResource, g.i.w.state.gslb.name, "-ojson")
 	require.NoError(g.i.w.t, err)
 	err = json.Unmarshal([]byte(strValue), &m)
 	require.NoError(g.i.w.t, err)
@@ -805,7 +825,7 @@ func (g *Gslb) GetAnnotations() (a map[string]string) {
 }
 
 func (g *Gslb) PatchAnnotations(a map[string]string) (err error) {
-	return g.i.patchAnnotations(g.i.w.state.gslb.name, "gslb", a)
+	return g.i.patchAnnotations(g.i.w.state.gslb.name, canonicalGslbResource, a)
 }
 
 func (ing *Ingress) PatchAnnotations(a map[string]string) (err error) {

@@ -4,7 +4,7 @@
 package test
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ func TestK8gbRepeatedlyRecreatedFromIngress(t *testing.T) {
 	const name = "test-gslb-failover-simple"
 
 	assertStrategy := func(t *testing.T, options *k8s.KubectlOptions) {
-		utils.AssertGslbSpec(t, options, name, "spec.strategy.splitBrainThresholdSeconds", "300")
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.dnsTtlSeconds", "5")
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.primaryGeoTag", settings.PrimaryGeoTag)
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.type", "failover")
@@ -103,7 +102,6 @@ func TestK8gbSpecKeepsStableAfterIngressUpdates(t *testing.T) {
 	const name = "test-gslb-lifecycle"
 
 	assertStrategy := func(t *testing.T, options *k8s.KubectlOptions) {
-		utils.AssertGslbSpec(t, options, name, "spec.strategy.splitBrainThresholdSeconds", "600")
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.dnsTtlSeconds", "5")
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.primaryGeoTag", settings.PrimaryGeoTag)
 		utils.AssertGslbSpec(t, options, name, "spec.strategy.type", "failover")

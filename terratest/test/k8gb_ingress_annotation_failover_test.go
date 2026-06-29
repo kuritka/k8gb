@@ -4,7 +4,7 @@
 package test
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -67,11 +67,10 @@ func TestK8gbIngressAnnotationFailover(t *testing.T) {
 	utils.AssertGslbSpec(t, options, "test-gslb-annotation-failover", ".spec.strategy.type", "failover")
 	utils.AssertGslbSpec(t, options, "test-gslb-annotation-failover", ".spec.strategy.primaryGeoTag", settings.PrimaryGeoTag)
 	utils.AssertGslbSpec(t, options, "test-gslb-annotation-failover", ".spec.strategy.dnsTtlSeconds", "5")
-	utils.AssertGslbSpec(t, options, "test-gslb-annotation-failover", ".spec.strategy.splitBrainThresholdSeconds", "600")
 
 	t.Run("Broken ingress is not proccessed", func(t *testing.T) {
 		utils.CreateGslb(t, options, settings, brokenResourcePath)
-		err := k8s.RunKubectlE(t, options, "get", "gslb", "broken-test-gslb-annotation-failover")
+		err := k8s.RunKubectlE(t, options, "get", "gslbs.k8gb.io", "broken-test-gslb-annotation-failover")
 		require.Error(t, err)
 	})
 

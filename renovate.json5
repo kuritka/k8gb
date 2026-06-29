@@ -26,19 +26,30 @@
       "matchCurrentVersion": "!/^v?0/",
       "groupName": "all non-major dependencies",
       "groupSlug": "all-minor-patch",
-    }, {
+    },
+    {
         "matchPackageNames": [
         "k8gb-io/k8gb",
       ],
       "groupName": "update SECURITY-INSIGHTS.yml",
       "groupSlug": "update-security-insights"
-    }, {
+    },
+    {
         "matchPackageNames": [
         "rancher/k3s",
       ],
       "groupName": "update k8s version",
       "groupSlug": "update-k8s-version"
-    }, {
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "groupName": "update golang version",
+      "groupSlug": "update-golang-version",
+      "rangeStrategy": "bump"
+    },
+    {
       "matchDepTypes": [
         "action",
       ],
@@ -74,5 +85,112 @@
       ],
       "extractVersionTemplate": "^(?<version>.+)(-k3s1)?(-k3s2)?$",
     },
+    // update bind9 and busybox images in deploy/edge/deployment.yaml
+    {
+      "fileMatch": ["^deploy/edge/deployment\\.yaml$"],
+      "datasourceTemplate": "docker",
+      "matchStrings": [
+        "image: (?<depName>.*):(?<currentValue>.*)"
+      ],
+    },
+    // update Istio version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "istio/istio",
+      "extractVersionTemplate": "^(?<version>.*)$",
+      "matchStrings": [
+        "ISTIO_VERSION \\?= v(?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "ISTIO_VERSION ?= v{{{newValue}}}"
+    },
+    // update controller-gen version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "kubernetes-sigs/controller-tools",
+      "extractVersionTemplate": "^v(?<version>.*)$",
+      "matchStrings": [
+        "CONTROLLER_GEN_VERSION \\?= v(?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "CONTROLLER_GEN_VERSION ?= v{{{newValue}}}"
+    },
+    // update NGINX ingress version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "kubernetes/ingress-nginx",
+      "extractVersionTemplate": "^helm-chart-(?<version>.*)$",
+      "matchStrings": [
+        "NGINX_INGRESS_VERSION \\?= (?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "NGINX_INGRESS_VERSION ?= {{{newValue}}}"
+    },
+    // update Grafana version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "grafana/helm-charts",
+      "extractVersionTemplate": "^grafana-(?<version>.*)$",
+      "matchStrings": [
+        "GRAFANA_VERSION \\?= (?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "GRAFANA_VERSION ?= {{{newValue}}}"
+    },
+    // update Podinfo version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "stefanprodan/podinfo",
+      "extractVersionTemplate": "^(?<version>.*)$",
+      "matchStrings": [
+        "PODINFO_VERSION \\?= (?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "PODINFO_VERSION ?= {{{newValue}}}"
+    },
+    // update Prometheus version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "prometheus-community/helm-charts",
+      "extractVersionTemplate": "^prometheus-(?<version>.*)$",
+      "matchStrings": [
+        "PROMETHEUS_VERSION \\?= (?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "PROMETHEUS_VERSION ?= {{{newValue}}}"
+    },
+    // update golangci-lint version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "golangci/golangci-lint",
+      "extractVersionTemplate": "^v(?<version>.*)$",
+      "matchStrings": [
+        "GOLANGCI_VERSION \\?= v(?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "GOLANGCI_VERSION ?= v{{{newValue}}}"
+    },
+    // update golangci-lint version in GitHub Actions workflow
+    {
+      "fileMatch": ["^\\.github/workflows/build\\.yml$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "golangci/golangci-lint",
+      "extractVersionTemplate": "^v(?<version>.*)$",
+      "matchStrings": [
+        "version: v(?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "version: v{{{newValue}}}"
+    },
+    // update gateway API version in Makefile
+    {
+      "fileMatch": ["^Makefile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "kubernetes-sigs/gateway-api",
+      "extractVersionTemplate": "^v(?<version>.*)$",
+      "matchStrings": [
+        "GATEWAY_API_VERSION \\?= v(?<currentValue>.*)",
+      ],
+      "autoReplaceStringTemplate": "GATEWAY_API_VERSION ?= v{{{newValue}}}"
+    }
   ],
 }

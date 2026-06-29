@@ -1,7 +1,7 @@
 package utils
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -131,7 +131,7 @@ func TestOneValidEdgeDNSInTheList(t *testing.T) {
 		t.Skipf("no connectivity, skipping")
 	}
 	// arrange
-	edgeDNSServers := []DNSServer{
+	parentZoneDNSServers := []DNSServer{
 		{Host: "127.1.2.3", Port: 53}, // wrong
 		{Host: "8.8.8.8", Port: 153},  // wrong
 		{Host: "8.8.8.8", Port: 53},   // ok
@@ -139,7 +139,7 @@ func TestOneValidEdgeDNSInTheList(t *testing.T) {
 	}
 	fqdn := defaultFqdn
 	// act
-	result, err := Dig(fqdn, 8, edgeDNSServers...)
+	result, err := Dig(fqdn, 8, parentZoneDNSServers...)
 	// assert
 	if err != nil && strings.HasSuffix(err.Error(), "->8.8.8.8:253: i/o timeout") {
 		// udp 8.8.8.8:253 may be blocked on some local environments
@@ -152,14 +152,14 @@ func TestOneValidEdgeDNSInTheList(t *testing.T) {
 
 func TestNoValidEdgeDNSInTheList(t *testing.T) {
 	// arrange
-	edgeDNSServers := []DNSServer{
+	parentZoneDNSServers := []DNSServer{
 		{Host: "", Port: 53},         // wrong
 		{Host: "8.8.8.8", Port: 153}, // wrong
 		{Host: "8.8.4.4", Port: 253}, // wrong
 	}
 	fqdn := defaultFqdn
 	// act
-	result, err := Dig(fqdn, 8, edgeDNSServers...)
+	result, err := Dig(fqdn, 8, parentZoneDNSServers...)
 	// assert
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -167,14 +167,14 @@ func TestNoValidEdgeDNSInTheList(t *testing.T) {
 
 func TestEmptyEdgeDNSInTheList(t *testing.T) {
 	// arrange
-	edgeDNSServers := []DNSServer{
+	parentZoneDNSServers := []DNSServer{
 		{Host: "", Port: 53},        // wrong
 		{Host: "8.8.8.8", Port: 53}, // ok
 		{Host: "8.8.4.4", Port: 53}, // ok
 	}
 	fqdn := defaultFqdn
 	// act
-	result, err := Dig(fqdn, 8, edgeDNSServers...)
+	result, err := Dig(fqdn, 8, parentZoneDNSServers...)
 	// assert
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -185,14 +185,14 @@ func TestMultipleValidEdgeDNSInTheList(t *testing.T) {
 		t.Skipf("no connectivity, skipping")
 	}
 	// arrange
-	edgeDNSServers := []DNSServer{
+	parentZoneDNSServers := []DNSServer{
 		{Host: "1.1.1.1", Port: 53}, // ok
 		{Host: "8.8.8.8", Port: 53}, // ok
 		{Host: "8.8.4.4", Port: 53}, // ok
 	}
 	fqdn := defaultFqdn
 	// act
-	result, err := Dig(fqdn, 8, edgeDNSServers...)
+	result, err := Dig(fqdn, 8, parentZoneDNSServers...)
 	// assert
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -259,6 +259,73 @@ func TestDigCNAMERecursion(t *testing.T) {
 			assert.Equal(t, result, []string{"10.1.0.3"})
 		})
 
+}
+
+func TestResolveHostnamesSingle(t *testing.T) {
+	testServer := DNSServer{
+		Host: server,
+		Port: port,
+	}
+	NewFakeDNS(testSettings).
+		AddARecord("myhost.cloud.example.com.", net.IPv4(1, 2, 3, 4)).
+		Start().
+		RunTestFunc(func() {
+			result, err := ResolveHostnames("myhost.cloud.example.com", testServer)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{"1.2.3.4"}, result)
+		}).RequireNoError(t)
+}
+
+func TestResolveHostnamesMultiple(t *testing.T) {
+	testServer := DNSServer{
+		Host: server,
+		Port: port,
+	}
+	NewFakeDNS(testSettings).
+		AddARecord("host1.cloud.example.com.", net.IPv4(1, 2, 3, 4)).
+		AddARecord("host2.cloud.example.com.", net.IPv4(5, 6, 7, 8)).
+		Start().
+		RunTestFunc(func() {
+			result, err := ResolveHostnames("host1.cloud.example.com, host2.cloud.example.com", testServer)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{"1.2.3.4", "5.6.7.8"}, result)
+		}).RequireNoError(t)
+}
+
+func TestResolveHostnamesUnresolvable(t *testing.T) {
+	// With no DNS servers provided, ResolveHostnames should return an error
+	result, err := ResolveHostnames("nonexistent.example.com")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestResolveHostnamesEmpty(t *testing.T) {
+	result, err := ResolveHostnames("")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "empty exposed-hostnames annotation value")
+}
+
+func TestResolveHostnamesWhitespaceOnly(t *testing.T) {
+	result, err := ResolveHostnames("   ")
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "empty exposed-hostnames annotation value")
+}
+
+func TestResolveHostnamesNoARecords(t *testing.T) {
+	testServer := DNSServer{
+		Host: server,
+		Port: port,
+	}
+	NewFakeDNS(testSettings).
+		Start().
+		RunTestFunc(func() {
+			result, err := ResolveHostnames("noanswer.cloud.example.com", testServer)
+			assert.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "resolved to no IP addresses")
+		}).RequireNoError(t)
 }
 
 func connected() (ok bool) {

@@ -62,32 +62,6 @@ Create the name of the service account to use
 {{- end -}}
 {{- end -}}
 
-{{- define "k8gb.extdnsProvider" -}}
-{{- if .Values.ns1.enabled -}}
-{{- print "ns1" -}}
-{{- end -}}
-{{- if .Values.route53.enabled }}
-{{- print "aws" -}}
-{{- end -}}
-{{- if .Values.rfc2136.enabled }}
-{{- print "rfc2136" -}}
-{{- end -}}
-{{- if .Values.azuredns.enabled }}
-{{- print "azure-dns" -}}
-{{- end -}}
-{{- if .Values.cloudflare.enabled }}
-{{- print "cloudflare" -}}
-{{- end -}}
-{{- end -}}
-
-{{- define "k8gb.extdnsOwnerID" -}}
-{{- if .Values.route53.enabled -}}
-k8gb-{{ .Values.route53.hostedZoneID }}-{{ .Values.k8gb.clusterGeoTag }}
-{{- else -}}
-k8gb-{{ .Values.k8gb.dnsZone }}-{{ .Values.k8gb.clusterGeoTag }}
-{{- end -}}
-{{- end -}}
-
 {{- define "k8gb.edgeDNSServers" -}}
 {{- if .Values.k8gb.edgeDNSServer -}}
 {{ .Values.k8gb.edgeDNSServer }}
@@ -96,90 +70,16 @@ k8gb-{{ .Values.k8gb.dnsZone }}-{{ .Values.k8gb.clusterGeoTag }}
 {{- end -}}
 {{- end -}}
 
-{{- define "k8gb.extdnsProviderOpts" -}}
-{{- if .Values.ns1.enabled -}}
-{{- if .Values.ns1.endpoint -}}
-        - --ns1-endpoint={{ .Values.ns1.endpoint }}
-{{- end -}}
-{{- if .Values.ns1.ignoreSSL -}}
-        - --ns1-ignoressl
-{{- end -}}
-        env:
-        - name: NS1_APIKEY
-          valueFrom:
-            secretKeyRef:
-              name: ns1
-              key: apiKey
+{{- define "k8gb.dnsZonesString" -}}
+{{- $entries := list -}}
+{{- range .Values.k8gb.dnsZones }}
+  {{- $dnsZoneNegTTL := toString (.dnsZoneNegTTL | default "300") }}
+  {{- $entry := printf "%s:%s:%s" .parentZone .loadBalancedZone $dnsZoneNegTTL }}
+  {{- $entries = append $entries $entry }}
 {{- end }}
-{{- if .Values.azuredns.enabled -}}
-        - --azure-resource-group={{ .Values.azuredns.resourceGroup }}
+{{- join ";" $entries }}
 {{- end }}
-{{- if and (eq .Values.rfc2136.enabled true) (eq .Values.rfc2136.rfc2136auth.insecure.enabled true) -}}
-        - --rfc2136-insecure
-{{- end -}}
-{{- if and (eq .Values.rfc2136.enabled true) (eq .Values.rfc2136.rfc2136auth.tsig.enabled true) -}}
-        - --rfc2136-tsig-axfr
-{{- range $k, $v := .Values.rfc2136.rfc2136auth.tsig.tsigCreds -}}
-{{- range $kk, $vv := $v }}
-        - --rfc2136-{{ $kk }}={{ $vv }}
-{{- end }}
-{{- end }}
-{{- end -}}
-{{- if and (eq .Values.rfc2136.enabled true) (eq .Values.rfc2136.rfc2136auth.gssTsig.enabled true) -}}
-        - --rfc2136-gss-tsig
-{{- range $k, $v := .Values.rfc2136.rfc2136auth.gssTsig.gssTsigCreds -}}
-{{- range $kk, $vv := $v }}
-        - --rfc2136-{{ $kk }}={{ $vv }}
-{{- end }}
-{{- end }}
-{{- end -}}
-{{ if .Values.rfc2136.enabled -}}
-{{- range $k, $v := .Values.rfc2136.rfc2136Opts -}}
-{{- range $kk, $vv := $v }}
-        - --rfc2136-{{ $kk }}={{ $vv }}
-{{- end }}
-{{- end }}
-        - --rfc2136-zone={{ .Values.k8gb.edgeDNSZone }}
-        env:
-        - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: rfc2136
-              key: secret
-{{- end -}}
-{{- if .Values.cloudflare.enabled -}}
-        - --zone-id-filter={{ .Values.cloudflare.zoneID }}
-        - --cloudflare-dns-records-per-page={{
-          .Values.cloudflare.dnsRecordsPerPage | default 5000 }}
-        env:
-        - name: CF_API_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: cloudflare
-              key: token
-{{- end -}}
-{{- end -}}
+
 {{- define "k8gb.metrics_port" -}}
 {{ print (split ":" .Values.k8gb.metricsAddress)._1 }}
-{{- end -}}
-
-{{- define "external-dns.azure-credentials" -}}
-{{- if and (eq .Values.azuredns.enabled true) (eq .Values.azuredns.createAuthSecret.enabled true) -}}
-{
-  "tenantId": "{{ .Values.azuredns.createAuthSecret.tenantId }}",
-  "subscriptionId": "{{ .Values.azuredns.createAuthSecret.subscriptionId }}",
-  "resourceGroup": "{{ .Values.azuredns.createAuthSecret.resourceGroup }}",
-  {{- if .Values.azuredns.createAuthSecret.aadClientId }}
-  "aadClientId": "{{ .Values.azuredns.createAuthSecret.aadClientId }}",
-  {{- end }}
-  {{- if .Values.azuredns.createAuthSecret.aadClientSecret }}
-  "aadClientSecret": "{{ .Values.azuredns.createAuthSecret.aadClientSecret }}",
-  {{- end }}
-  "useManagedIdentityExtension": {{ .Values.azuredns.createAuthSecret.useManagedIdentityExtension | default false }},
-  {{- if .Values.azuredns.createAuthSecret.userAssignedIdentityID }}
-  "userAssignedIdentityID": "{{ .Values.azuredns.createAuthSecret.userAssignedIdentityID }}",
-  {{- end }}
-  "useWorkloadIdentityExtension": {{ .Values.azuredns.createAuthSecret.useWorkloadIdentityExtension | default false }}
-}
-{{- end -}}
 {{- end -}}

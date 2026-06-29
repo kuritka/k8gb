@@ -1,7 +1,7 @@
 package main
 
 /*
-Copyright 2022 The k8gb Contributors.
+Copyright 2021-2025 The k8gb Contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,14 +22,24 @@ import (
 	"context"
 	"os"
 
+	"github.com/go-logr/logr"
+
+	"github.com/k8gb-io/k8gb/controllers/ipresolver"
+	"github.com/k8gb-io/k8gb/controllers/utils"
+	"github.com/k8gb-io/k8gb/controllers/zones"
+
+	k8gbv1beta1iozonedeleagtion "github.com/k8gb-io/k8gb/api/k8gb.io/v1beta1"
 	k8gbv1beta1 "github.com/k8gb-io/k8gb/api/v1beta1"
+	k8gbv1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
 	"github.com/k8gb-io/k8gb/controllers"
-	"github.com/k8gb-io/k8gb/controllers/depresolver"
 	"github.com/k8gb-io/k8gb/controllers/logging"
 	"github.com/k8gb-io/k8gb/controllers/providers/dns"
 	"github.com/k8gb-io/k8gb/controllers/providers/metrics"
+	"github.com/k8gb-io/k8gb/controllers/resolver"
 	"github.com/k8gb-io/k8gb/controllers/tracing"
+
 	istio "istio.io/client-go/pkg/apis/networking/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -38,7 +48,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
-	externaldns "sigs.k8s.io/external-dns/endpoint"
+	externaldnsApi "sigs.k8s.io/external-dns/apis/v1alpha1"
+	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
+	gatewayapiv1alpha3 "sigs.k8s.io/gateway-api/apis/v1alpha3"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -51,7 +64,12 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(runtimescheme))
 	utilruntime.Must(k8gbv1beta1.AddToScheme(runtimescheme))
+	utilruntime.Must(k8gbv1beta1io.AddToScheme(runtimescheme))
+	utilruntime.Must(k8gbv1beta1iozonedeleagtion.AddToScheme(runtimescheme))
 	utilruntime.Must(istio.AddToScheme(runtimescheme))
+	utilruntime.Must(gatewayapiv1.Install(runtimescheme))
+	utilruntime.Must(gatewayapiv1alpha2.Install(runtimescheme))
+	utilruntime.Must(gatewayapiv1alpha3.Install(runtimescheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -63,9 +81,9 @@ func main() {
 
 func run() error {
 	var f *dns.ProviderFactory
-	resolver := depresolver.NewDependencyResolver()
-	config, err := resolver.ResolveOperatorConfig()
-	deprecations := resolver.GetDeprecations()
+	r := resolver.NewResolver()
+	config, err := r.ResolveOperatorConfig()
+	deprecations := r.GetDeprecations()
 	// Initialize desired log or default log in case of configuration failed.
 	logging.Init(config)
 	log := logging.Logger()
@@ -81,7 +99,7 @@ func run() error {
 		Interface("config", config).
 		Msg("Resolved config")
 
-	ctrl.SetLogger(logging.NewLogrAdapter(log))
+	ctrl.SetLogger(logr.Discard())
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: runtimescheme,
@@ -105,17 +123,10 @@ func run() error {
 	// Add external-dns DNSEndpoints resource
 	// https://github.com/operator-framework/operator-sdk/blob/master/doc/user-guide.md#adding-3rd-party-resources-to-your-operator
 	schemeBuilder := &scheme.Builder{GroupVersion: schema.GroupVersion{Group: "externaldns.k8s.io", Version: "v1alpha1"}}
-	schemeBuilder.Register(&externaldns.DNSEndpoint{}, &externaldns.DNSEndpointList{})
+	schemeBuilder.Register(&externaldnsApi.DNSEndpoint{}, &externaldnsApi.DNSEndpointList{})
 	if err := schemeBuilder.AddToScheme(mgr.GetScheme()); err != nil {
 		log.Err(err).Msg("Unable to register ExternalDNS resource schemas")
 		return err
-	}
-
-	reconciler := &controllers.GslbReconciler{
-		Config:      config,
-		Client:      mgr.GetClient(),
-		DepResolver: resolver,
-		Scheme:      mgr.GetScheme(),
 	}
 
 	log.Info().Msg("Starting metrics")
@@ -126,22 +137,92 @@ func run() error {
 		log.Err(err).Msg("Unable to register metrics")
 		return err
 	}
+	// Initialize all metrics with zero values so they appear in Prometheus dashboards
+	metrics.Metrics().InitializeZeroValues()
 
 	log.Info().Msg("Resolving DNS provider")
-	f, err = dns.NewDNSProviderFactory(reconciler.Client, *reconciler.Config)
+	f, err = dns.NewDNSProviderFactory(context.TODO(), mgr.GetClient(), *config)
 	if err != nil {
 		log.Err(err).Msg("Unable to create DNS provider factory")
 		return err
 	}
-	reconciler.DNSProvider = f.Provider()
-	log.Info().
-		Str("provider", reconciler.DNSProvider.String()).
-		Msg("Started DNS provider")
+	log.Info().Str("provider", f.Provider().String()).Msg("DNS provider resolved")
+	ipResolver := ipresolver.NewResolver(config, mgr.GetClient(), utils.NewDNSQueryService())
+	zoneDelegationService := zones.NewZoneDelegationImpl(mgr.GetClient(), mgr.GetAPIReader(), config, ipResolver)
+	gslbReconciler := &controllers.GslbReconciler{
+		Config:             config,
+		Client:             mgr.GetClient(),
+		Resolver:           r,
+		Scheme:             mgr.GetScheme(),
+		GslbIngressHandler: controllers.NewIngressHandler(context.TODO(), mgr.GetClient(), mgr.GetScheme(), log),
+		ZoneService:        zoneDelegationService,
+		Logger:             log,
+	}
+	legacyReconciler := &controllers.LegacyGslbReconciler{
+		Config:      config,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		ZoneService: zoneDelegationService,
+		Logger:      log,
+	}
+	legacyMigrator := &controllers.LegacyGslbMigrationReconciler{
+		Client:   mgr.GetClient(),
+		Recorder: mgr.GetEventRecorderFor("legacy-gslb-migrator"),
+	}
 
-	if err = reconciler.SetupWithManager(mgr); err != nil {
-		log.Err(err).Msg("Unable to create Gslb controller")
+	corednsReconciler := &controllers.CoreDNSReconciler{
+		Config:      config,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		DNSProvider: f.Provider(),
+		ZoneService: zoneDelegationService,
+		IPResolver:  ipResolver,
+		Logger:      log,
+	}
+
+	zoneDelegationReconciler := &controllers.ZoneDelegationReconciler{
+		Config:      config,
+		Client:      mgr.GetClient(),
+		ZoneService: zoneDelegationService,
+		IPResolver:  ipResolver,
+		DNSProvider: f.Provider(),
+		Logger:      log,
+	}
+
+	if err = zoneDelegationReconciler.SetupWithManager(mgr); err != nil {
+		log.Err(err).Msg("Unable to create ZoneDelegation reconciler")
 		return err
 	}
+
+	if err = gslbReconciler.SetupWithManager(mgr); err != nil {
+		log.Err(err).Msg("Unable to create Gslb reconciler")
+		return err
+	}
+
+	legacyGVK := k8gbv1beta1.GroupVersion.WithKind("Gslb")
+	if _, err = mgr.GetRESTMapper().RESTMapping(legacyGVK.GroupKind(), legacyGVK.Version); err != nil {
+		if meta.IsNoMatchError(err) {
+			log.Info().Msg("Legacy Gslb CRD not found; skipping legacy migration controller")
+		} else {
+			log.Err(err).Msg("Unable to resolve legacy Gslb mapping")
+			return err
+		}
+	} else {
+		if err = legacyReconciler.SetupWithManager(mgr); err != nil {
+			log.Err(err).Msg("Unable to create legacy Gslb reconciler")
+			return err
+		}
+		if err = legacyMigrator.SetupWithManager(mgr); err != nil {
+			log.Err(err).Msg("Unable to create legacy Gslb migration reconciler")
+			return err
+		}
+	}
+
+	if err = corednsReconciler.SetupWithManager(mgr); err != nil {
+		log.Err(err).Msg("Unable to create coreDNS reconciler")
+		return err
+	}
+
 	metrics.Metrics().SetRuntimeInfo(version, commit)
 
 	// tracing
@@ -153,7 +234,7 @@ func run() error {
 		AppVersion:    version,
 	}
 	cleanup, tracer := tracing.SetupTracing(context.Background(), cfg, log)
-	reconciler.Tracer = tracer
+	gslbReconciler.Tracer = tracer
 	defer cleanup()
 
 	// +kubebuilder:scaffold:builder
